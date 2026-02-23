@@ -365,7 +365,9 @@ Respond ONLY with valid JSON — an array of opportunities (empty array [] if no
 Critical rules:
 - MOST batches should return [] — be extremely conservative
 - Only flag messages that describe a SPECIFIC, CONCRETE code change
-- The message must contain enough detail for a coding agent to act on it WITHOUT asking questions
+- The message must contain enough detail that a human developer would know what to do — the coding agent WILL search the codebase to find the relevant files, so "which file" is NOT required
+- Needing to explore the codebase (find the right component, read existing patterns) is NORMAL and expected — that does NOT reduce confidence
+- What DOES reduce confidence: vague intent, ambiguous requirements, needing a product decision, unclear desired behavior
 - Vague complaints, general discussions, or questions should NEVER be flagged
 - Only "bug" and "feature" categories are allowed
 - Only "tiny" (1-2 lines) or "small" (1 file) estimated sizes

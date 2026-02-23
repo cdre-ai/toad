@@ -46,6 +46,12 @@ func OpenDBAt(dbPath string) (*DB, error) {
 		return nil, fmt.Errorf("setting WAL mode: %w", err)
 	}
 
+	// Wait up to 5s on write contention instead of failing immediately with SQLITE_BUSY
+	if _, err := db.Exec("PRAGMA busy_timeout=5000"); err != nil {
+		db.Close()
+		return nil, fmt.Errorf("setting busy timeout: %w", err)
+	}
+
 	if err := migrate(db); err != nil {
 		db.Close()
 		return nil, fmt.Errorf("migrating state db: %w", err)

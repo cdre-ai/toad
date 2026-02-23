@@ -72,6 +72,8 @@ func (w *Watcher) poll(ctx context.Context) {
 		return
 	}
 
+	slog.Debug("PR watcher polling", "open_watches", len(watches))
+
 	for _, watch := range watches {
 		if err := w.checkPR(ctx, watch); err != nil {
 			slog.Warn("failed to check PR", "pr", watch.PRNumber, "error", err)
@@ -107,15 +109,26 @@ func (w *Watcher) checkPR(ctx context.Context, watch *state.PRWatch) error {
 		return w.db.ClosePRWatch(watch.PRNumber)
 	}
 
-	// Fetch review comments
-	comments, err := w.getReviewComments(ctx, watch.PRNumber)
+	// Fetch both inline review comments AND conversation comments.
+	// GitHub has two separate APIs: pulls/{n}/comments for inline code review
+	// comments, and issues/{n}/comments for conversation-tab comments.
+	reviewComments, err := w.getReviewComments(ctx, watch.PRNumber)
 	if err != nil {
-		return fmt.Errorf("getting review comments: %w", err)
+		slog.Warn("failed to get review comments, continuing", "pr", watch.PRNumber, "error", err)
 	}
+	issueComments, err := w.getIssueComments(ctx, watch.PRNumber)
+	if err != nil {
+		slog.Warn("failed to get issue comments, continuing", "pr", watch.PRNumber, "error", err)
+	}
+
+	// Merge both comment types — IDs are globally unique across GitHub
+	var allComments []ghComment
+	allComments = append(allComments, reviewComments...)
+	allComments = append(allComments, issueComments...)
 
 	// Filter to new comments from humans (not bots, not toad)
 	var newComments []ghComment
-	for _, c := range comments {
+	for _, c := range allComments {
 		if c.ID <= watch.LastCommentID {
 			continue
 		}
@@ -124,6 +137,13 @@ func (w *Watcher) checkPR(ctx context.Context, watch *state.PRWatch) error {
 		}
 		newComments = append(newComments, c)
 	}
+
+	slog.Debug("PR check complete",
+		"pr", watch.PRNumber,
+		"review_comments", len(reviewComments),
+		"issue_comments", len(issueComments),
+		"new_human_comments", len(newComments),
+	)
 
 	if len(newComments) == 0 {
 		return nil
@@ -196,6 +216,28 @@ func (w *Watcher) getReviewComments(ctx context.Context, prNumber int) ([]ghComm
 	var comments []ghComment
 	if err := json.Unmarshal(stdout.Bytes(), &comments); err != nil {
 		return nil, fmt.Errorf("parsing comments: %w", err)
+	}
+	return comments, nil
+}
+
+func (w *Watcher) getIssueComments(ctx context.Context, prNumber int) ([]ghComment, error) {
+	cmd := exec.CommandContext(ctx, "gh", "api",
+		fmt.Sprintf("repos/{owner}/{repo}/issues/%d/comments", prNumber),
+		"--jq", ".",
+	)
+	cmd.Dir = w.repoPath
+
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+
+	if err := cmd.Run(); err != nil {
+		return nil, fmt.Errorf("%w: %s", err, strings.TrimSpace(stderr.String()))
+	}
+
+	var comments []ghComment
+	if err := json.Unmarshal(stdout.Bytes(), &comments); err != nil {
+		return nil, fmt.Errorf("parsing issue comments: %w", err)
 	}
 	return comments, nil
 }
