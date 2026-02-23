@@ -207,11 +207,11 @@ func runDaemon(cmd *cobra.Command, args []string) error {
 			select {
 			case <-ticker.C:
 				ds := &state.DaemonStats{
-					Heartbeat:        time.Now(),
-					StartedAt:        daemonStartedAt,
-					PID:              os.Getpid(),
-					Ribbits:          daemonCounters.ribbits.Load(),
-					Triages:          daemonCounters.triages.Load(),
+					Heartbeat: time.Now(),
+					StartedAt: daemonStartedAt,
+					PID:       os.Getpid(),
+					Ribbits:   daemonCounters.ribbits.Load(),
+					Triages:   daemonCounters.triages.Load(),
 					TriageByCategory: map[string]int64{
 						"bug":      daemonCounters.triageBug.Load(),
 						"feature":  daemonCounters.triageFeature.Load(),
@@ -810,4 +810,3 @@ func checkGH() error {
 	}
 	return nil
 }
-

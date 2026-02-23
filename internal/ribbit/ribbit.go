@@ -147,4 +147,3 @@ func (e *Engine) Respond(ctx context.Context, messageText string, tr *triage.Res
 
 	return &Response{Text: envelope.Result}, nil
 }
-

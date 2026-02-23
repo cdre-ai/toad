@@ -64,14 +64,14 @@ func handleAppMention(ctx context.Context, c *Client, ev *slackevents.AppMention
 	}
 
 	msg := &IncomingMessage{
-		Text:           ev.Text,
-		Channel:        ev.Channel,
-		User:           ev.User,
-		Timestamp:      ev.TimeStamp,
+		Text:            ev.Text,
+		Channel:         ev.Channel,
+		User:            ev.User,
+		Timestamp:       ev.TimeStamp,
 		ThreadTimestamp: ev.ThreadTimeStamp,
-		IsMention:      true,
-		IsTriggered:    true,
-		IsBot:          ev.BotID != "",
+		IsMention:       true,
+		IsTriggered:     true,
+		IsBot:           ev.BotID != "",
 	}
 
 	slog.Info("app mention received", "channel", ev.Channel, "user", ev.User)
@@ -107,14 +107,14 @@ func handleMessage(ctx context.Context, c *Client, ev *slackevents.MessageEvent)
 	triggered := !isBot && hasKeywordTrigger(ev.Text, c.triggers.Keywords)
 
 	msg := &IncomingMessage{
-		Text:           ev.Text,
-		Channel:        ev.Channel,
-		User:           ev.User,
-		Timestamp:      ev.TimeStamp,
+		Text:            ev.Text,
+		Channel:         ev.Channel,
+		User:            ev.User,
+		Timestamp:       ev.TimeStamp,
 		ThreadTimestamp: ev.ThreadTimeStamp,
-		IsMention:      false,
-		IsTriggered:    triggered,
-		IsBot:          isBot,
+		IsMention:       false,
+		IsTriggered:     triggered,
+		IsBot:           isBot,
 	}
 
 	slog.Debug("dispatching message", "channel", ev.Channel, "triggered", triggered, "bot", isBot)

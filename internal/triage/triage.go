@@ -98,8 +98,8 @@ func (e *Engine) Classify(ctx context.Context, msg *islack.IncomingMessage, chan
 	// The output-format json wraps result in a JSON envelope.
 	// Parse the envelope first.
 	var envelope struct {
-		Result string `json:"result"`
-		IsError bool  `json:"is_error"`
+		Result  string `json:"result"`
+		IsError bool   `json:"is_error"`
 	}
 	if err := json.Unmarshal(output, &envelope); err != nil {
 		// Try parsing as direct result

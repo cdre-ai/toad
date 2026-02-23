@@ -83,10 +83,10 @@ func (w *Watcher) poll(ctx context.Context) {
 
 // ghComment represents a review comment from the GitHub API.
 type ghComment struct {
-	ID        int    `json:"id"`
-	Body      string `json:"body"`
-	Path      string `json:"path"`
-	User      struct {
+	ID   int    `json:"id"`
+	Body string `json:"body"`
+	Path string `json:"path"`
+	User struct {
 		Login string `json:"login"`
 		Type  string `json:"type"` // "User" or "Bot"
 	} `json:"user"`

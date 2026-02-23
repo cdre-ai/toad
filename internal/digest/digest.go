@@ -28,11 +28,11 @@ type Message struct {
 
 // Opportunity is a potential one-shot fix identified by the digest analysis.
 type Opportunity struct {
-	Summary    string  `json:"summary"`
-	Category   string  `json:"category"`
-	Confidence float64 `json:"confidence"`
-	EstSize    string  `json:"estimated_size"`
-	MessageIdx int     `json:"message_index"`
+	Summary    string   `json:"summary"`
+	Category   string   `json:"category"`
+	Confidence float64  `json:"confidence"`
+	EstSize    string   `json:"estimated_size"`
+	MessageIdx int      `json:"message_index"`
 	Keywords   []string `json:"keywords"`
 	FilesHint  []string `json:"files_hint"`
 }
@@ -64,11 +64,11 @@ type chunk struct {
 
 // DigestStats holds observable digest engine metrics.
 type DigestStats struct {
-	BufferSize    int
-	NextFlush     time.Time
+	BufferSize     int
+	NextFlush      time.Time
 	TotalProcessed int64
-	TotalOpps     int64
-	TotalSpawns   int64
+	TotalOpps      int64
+	TotalSpawns    int64
 }
 
 // Engine collects messages and periodically analyzes them for one-shot opportunities.

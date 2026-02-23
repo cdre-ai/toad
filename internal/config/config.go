@@ -48,12 +48,12 @@ type ServiceConfig struct {
 }
 
 type LimitsConfig struct {
-	MaxConcurrent  int     `yaml:"max_concurrent"`
-	MaxTurns       int     `yaml:"max_turns"`
-	TimeoutMinutes int     `yaml:"timeout_minutes"`
-	MaxFilesChanged int    `yaml:"max_files_changed"`
-	MaxBudgetUSD   float64 `yaml:"max_budget_usd"`
-	MaxRetries     int     `yaml:"max_retries"`
+	MaxConcurrent   int     `yaml:"max_concurrent"`
+	MaxTurns        int     `yaml:"max_turns"`
+	TimeoutMinutes  int     `yaml:"timeout_minutes"`
+	MaxFilesChanged int     `yaml:"max_files_changed"`
+	MaxBudgetUSD    float64 `yaml:"max_budget_usd"`
+	MaxRetries      int     `yaml:"max_retries"`
 }
 
 type TriageConfig struct {
@@ -67,15 +67,15 @@ type ClaudeConfig struct {
 }
 
 type DigestConfig struct {
-	Enabled           bool     `yaml:"enabled"`              // default: false (opt-in)
-	DryRun            bool     `yaml:"dry_run"`              // collect + analyze but skip spawn/notify
-	BatchMinutes      int      `yaml:"batch_minutes"`        // default: 5
-	MinConfidence     float64  `yaml:"min_confidence"`       // default: 0.95
-	MaxAutoSpawnHour  int      `yaml:"max_auto_spawn_hour"`  // default: 3
-	AllowedCategories []string `yaml:"allowed_categories"`   // default: ["bug"]
-	MaxEstSize        string   `yaml:"max_est_size"`         // default: "small"
-	MaxChunkSize      int      `yaml:"max_chunk_size"`       // default: 50
-	ChunkTimeoutSecs  int      `yaml:"chunk_timeout_secs"`   // default: 60
+	Enabled           bool     `yaml:"enabled"`             // default: false (opt-in)
+	DryRun            bool     `yaml:"dry_run"`             // collect + analyze but skip spawn/notify
+	BatchMinutes      int      `yaml:"batch_minutes"`       // default: 5
+	MinConfidence     float64  `yaml:"min_confidence"`      // default: 0.95
+	MaxAutoSpawnHour  int      `yaml:"max_auto_spawn_hour"` // default: 3
+	AllowedCategories []string `yaml:"allowed_categories"`  // default: ["bug"]
+	MaxEstSize        string   `yaml:"max_est_size"`        // default: "small"
+	MaxChunkSize      int      `yaml:"max_chunk_size"`      // default: 50
+	ChunkTimeoutSecs  int      `yaml:"chunk_timeout_secs"`  // default: 60
 }
 
 type LogConfig struct {
@@ -99,12 +99,12 @@ func defaults() *Config {
 			DefaultBranch: "main",
 		},
 		Limits: LimitsConfig{
-			MaxConcurrent:  2,
-			MaxTurns:       30,
-			TimeoutMinutes: 10,
+			MaxConcurrent:   2,
+			MaxTurns:        30,
+			TimeoutMinutes:  10,
 			MaxFilesChanged: 5,
-			MaxBudgetUSD:   1.0,
-			MaxRetries:     1,
+			MaxBudgetUSD:    1.0,
+			MaxRetries:      1,
 		},
 		Triage: TriageConfig{
 			Model:     "haiku",

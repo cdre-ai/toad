@@ -16,13 +16,13 @@ import (
 
 // IncomingMessage represents a parsed Slack message ready for processing.
 type IncomingMessage struct {
-	Text           string
-	Channel        string
-	ChannelName    string
-	User           string
-	UserName       string
-	Timestamp      string // message ts
-	ThreadTimestamp string // parent thread ts (if reply)
+	Text             string
+	Channel          string
+	ChannelName      string
+	User             string
+	UserName         string
+	Timestamp        string // message ts
+	ThreadTimestamp  string // parent thread ts (if reply)
 	IsMention        bool
 	IsTriggered      bool
 	IsBot            bool
@@ -44,16 +44,16 @@ type MessageHandler func(ctx context.Context, msg *IncomingMessage)
 
 // Client manages the Slack Socket Mode connection and event routing.
 type Client struct {
-	api        *slack.Client
-	socket     *socketmode.Client
-	channels   map[string]bool
-	triggers   config.Triggers
-	handler    MessageHandler
-	botUserID  string
-	seen       map[string]time.Time // dedup: key → first-seen time
-	seenMu     sync.Mutex
-	replies    map[string]time.Time // toad's own reply timestamps (channel:ts → sent time)
-	repliesMu  sync.Mutex
+	api       *slack.Client
+	socket    *socketmode.Client
+	channels  map[string]bool
+	triggers  config.Triggers
+	handler   MessageHandler
+	botUserID string
+	seen      map[string]time.Time // dedup: key → first-seen time
+	seenMu    sync.Mutex
+	replies   map[string]time.Time // toad's own reply timestamps (channel:ts → sent time)
+	repliesMu sync.Mutex
 }
 
 // NewClient creates a new Slack client configured for Socket Mode.
@@ -324,7 +324,7 @@ func (c *Client) FetchMessage(channel, ts string) (*IncomingMessage, error) {
 		ChannelID: channel,
 		Timestamp: ts,
 		Limit:     1,
-		Inclusive:  true,
+		Inclusive: true,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("fetching message: %w", err)
@@ -334,13 +334,13 @@ func (c *Client) FetchMessage(channel, ts string) (*IncomingMessage, error) {
 	}
 	m := msgs[0]
 	return &IncomingMessage{
-		Text:           m.Text,
-		Channel:        channel,
-		User:           m.User,
-		Timestamp:      m.Timestamp,
+		Text:            m.Text,
+		Channel:         channel,
+		User:            m.User,
+		Timestamp:       m.Timestamp,
 		ThreadTimestamp: m.ThreadTimestamp,
-		IsBot:          m.BotID != "",
-		IsTriggered:    true,
+		IsBot:           m.BotID != "",
+		IsTriggered:     true,
 	}, nil
 }
 

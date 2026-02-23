@@ -8,7 +8,7 @@ import (
 
 // RecoverResult summarizes what was cleaned up on startup.
 type RecoverResult struct {
-	StaleRuns      int
+	StaleRuns       int
 	OrphanWorktrees int
 }
 
