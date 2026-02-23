@@ -599,3 +599,45 @@ func TestDB_SaveRunWithResult(t *testing.T) {
 		t.Error("result should be preserved through save/load")
 	}
 }
+
+func TestDB_HasRecentOpportunity(t *testing.T) {
+	db := openTestDB(t)
+
+	// No opportunities yet
+	has, err := db.HasRecentOpportunity("fix the bug", 1*time.Hour)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if has {
+		t.Error("expected no recent opportunity")
+	}
+
+	// Save one
+	opp := &DigestOpportunity{
+		Summary:   "fix the bug",
+		Category:  "bug",
+		Channel:   "C123",
+		CreatedAt: time.Now(),
+	}
+	if err := db.SaveDigestOpportunity(opp); err != nil {
+		t.Fatal(err)
+	}
+
+	// Now it should be found
+	has, err = db.HasRecentOpportunity("fix the bug", 1*time.Hour)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !has {
+		t.Error("expected to find recent opportunity")
+	}
+
+	// Different summary should not match
+	has, err = db.HasRecentOpportunity("different bug", 1*time.Hour)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if has {
+		t.Error("expected no match for different summary")
+	}
+}

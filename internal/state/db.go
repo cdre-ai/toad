@@ -396,6 +396,22 @@ func (d *DB) SaveDigestOpportunity(opp *DigestOpportunity) error {
 	return err
 }
 
+// HasRecentOpportunity checks if an opportunity with the same summary was already
+// processed within the given duration. Used for cross-batch dedup to avoid
+// re-investigating the same issue flagged in consecutive digest cycles.
+func (d *DB) HasRecentOpportunity(summary string, within time.Duration) (bool, error) {
+	cutoff := time.Now().Add(-within)
+	var count int
+	err := d.db.QueryRow(
+		"SELECT COUNT(*) FROM digest_opportunities WHERE summary = ? AND created_at > ?",
+		summary, cutoff,
+	).Scan(&count)
+	if err != nil {
+		return false, err
+	}
+	return count > 0, nil
+}
+
 // RecentDigestOpportunities returns the most recent digest opportunities, newest first.
 func (d *DB) RecentDigestOpportunities(limit int) ([]*DigestOpportunity, error) {
 	rows, err := d.db.Query(

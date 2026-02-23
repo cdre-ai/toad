@@ -17,8 +17,9 @@ import (
 
 // WorktreeResult holds paths created by worktree setup.
 type WorktreeResult struct {
-	Path   string // ~/.toad/worktrees/<slug>-<id>
-	Branch string // toad/<slug>
+	Path      string // ~/.toad/worktrees/<slug>-<id>
+	Branch    string // toad/<slug>
+	StaleBase bool   // true if fetch failed and worktree uses potentially outdated code
 }
 
 // CreateWorktree creates a git worktree for an isolated tadpole run.
@@ -53,17 +54,20 @@ func CreateWorktree(ctx context.Context, repoPath, slug, defaultBranch string) (
 	}
 
 	// Fetch latest inside the worktree so we don't lock the main repo
+	staleBase := false
 	slog.Debug("fetching origin in worktree", "branch", defaultBranch)
 	if err := gitRunCtx(ctx, wtPath, "fetch", "origin", defaultBranch); err != nil {
 		slog.Warn("fetch in worktree failed, continuing with existing ref", "error", err)
+		staleBase = true
 	} else {
 		// Reset to the freshly fetched ref
 		if err := gitRunCtx(ctx, wtPath, "reset", "--hard", "origin/"+defaultBranch); err != nil {
 			slog.Warn("reset to fetched ref failed", "error", err)
+			staleBase = true
 		}
 	}
 
-	return &WorktreeResult{Path: wtPath, Branch: branch}, nil
+	return &WorktreeResult{Path: wtPath, Branch: branch, StaleBase: staleBase}, nil
 }
 
 // CheckoutWorktree creates a worktree from an existing remote branch (for review fixes).
@@ -114,11 +118,11 @@ func pushBranch(ctx context.Context, worktreePath, branch string) error {
 }
 
 // RemoveWorktree force-removes a worktree and prunes. Best-effort cleanup.
-// Uses a 30-second timeout to avoid hanging during shutdown.
-func RemoveWorktree(repoPath, wtPath string) error {
+// Applies a 30-second timeout on top of the provided context.
+func RemoveWorktree(ctx context.Context, repoPath, wtPath string) error {
 	slog.Info("removing worktree", "path", wtPath)
 
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
 
 	if err := gitRunCtx(ctx, repoPath, "worktree", "remove", "--force", wtPath); err != nil {
@@ -157,7 +161,7 @@ func randomHex(n int) (string, error) {
 	if _, err := rand.Read(b); err != nil {
 		return "", err
 	}
-	return hex.EncodeToString(b)[:n], nil
+	return hex.EncodeToString(b), nil
 }
 
 func gitRunCtx(ctx context.Context, dir string, args ...string) error {

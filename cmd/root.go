@@ -699,6 +699,7 @@ func investigateOpportunity(ctx context.Context, cfg *config.Config, opp digest.
 	// Parse JSON envelope from --output-format json
 	var envelope struct {
 		Result  string `json:"result"`
+		Subtype string `json:"subtype"`
 		IsError bool   `json:"is_error"`
 	}
 	resultText := string(output)
@@ -711,8 +712,8 @@ func investigateOpportunity(ctx context.Context, cfg *config.Config, opp digest.
 
 	// Parse the investigation result JSON from Claude's response
 	var result struct {
-		Feasible bool   `json:"feasible"`
-		TaskSpec string `json:"task_spec"`
+		Feasible  bool   `json:"feasible"`
+		TaskSpec  string `json:"task_spec"`
 		Reasoning string `json:"reasoning"`
 	}
 
@@ -720,9 +721,13 @@ func investigateOpportunity(ctx context.Context, cfg *config.Config, opp digest.
 	text := strings.TrimSpace(resultText)
 	start := strings.Index(text, "{")
 	if start < 0 {
+		reason := "investigation returned no JSON response"
+		if envelope.Subtype == "error_max_turns" {
+			reason = "investigation hit max turns without producing a result"
+		}
 		return &digest.InvestigateResult{
 			Feasible:  false,
-			Reasoning: "investigation returned no JSON response",
+			Reasoning: reason,
 		}, nil
 	}
 	end := findMatchingBrace(text, start)

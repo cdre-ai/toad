@@ -222,6 +222,15 @@ func (e *Engine) processOpportunities(ctx context.Context, msgs []Message, oppor
 
 		e.totalOpps.Add(1)
 
+		// Cross-batch dedup: skip if the same summary was already processed recently
+		if e.db != nil {
+			if recent, err := e.db.HasRecentOpportunity(opp.Summary, 1*time.Hour); err == nil && recent {
+				slog.Info("digest skipping duplicate opportunity (already processed recently)",
+					"summary", opp.Summary)
+				continue
+			}
+		}
+
 		// Resolve the original message
 		if opp.MessageIdx < 0 || opp.MessageIdx >= len(msgs) {
 			slog.Warn("digest opportunity has invalid message index", "idx", opp.MessageIdx)
@@ -429,7 +438,11 @@ func parseOpportunities(data []byte) ([]Opportunity, error) {
 
 	var opps []Opportunity
 	if err := json.Unmarshal([]byte(text), &opps); err != nil {
-		return nil, fmt.Errorf("parsing digest opportunities: %w", err)
+		preview := text
+		if len(preview) > 200 {
+			preview = preview[:200] + "..."
+		}
+		return nil, fmt.Errorf("parsing digest opportunities: %w (text: %q)", err, preview)
 	}
 	return opps, nil
 }

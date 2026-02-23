@@ -98,11 +98,15 @@ func (r *Runner) Execute(ctx context.Context, task Task) error {
 	if err != nil {
 		return fail(fmt.Sprintf("worktree setup: %s", err))
 	}
-	defer RemoveWorktree(r.cfg.Repo.Path, wt.Path)
+	defer RemoveWorktree(context.WithoutCancel(ctx), r.cfg.Repo.Path, wt.Path)
 
 	run.Branch = wt.Branch
 	run.WorktreePath = wt.Path
 	slog.Info("worktree created", "path", wt.Path, "branch", wt.Branch)
+
+	if wt.StaleBase {
+		r.updateStatus(task, statusTS, ":warning: Working with potentially outdated code (fetch failed)")
+	}
 
 	// 2. Run Claude
 	r.updateStatus(task, statusTS, ":hammer_and_wrench: Claude is working...")
