@@ -270,18 +270,6 @@ func handleMessage(
 		return
 	}
 
-	// Feed non-bot messages to digest engine (Toad King) for batch analysis
-	if digestEngine != nil {
-		digestEngine.Collect(digest.Message{
-			Channel:     msg.Channel,
-			ChannelName: channelName,
-			User:        msg.User,
-			Text:        msg.Text,
-			ThreadTS:    msg.ThreadTimestamp,
-			Timestamp:   msg.Timestamp,
-		})
-	}
-
 	// EXPLICIT TRIGGER: @toad mention or reaction/keyword trigger
 	if msg.IsMention || msg.IsTriggered {
 		slog.Debug("handler: triggered path", "mention", msg.IsMention, "triggered", msg.IsTriggered, "channel", channelName)
@@ -298,7 +286,25 @@ func handleMessage(
 		return
 	}
 
-	// PASSIVE MONITORING — also respect concurrency limit
+	// Feed untriggered messages to digest engine (Toad King) for batch analysis.
+	// Triggered messages are handled individually above — no need to double-process.
+	if digestEngine != nil {
+		digestEngine.Collect(digest.Message{
+			Channel:     msg.Channel,
+			ChannelName: channelName,
+			User:        msg.User,
+			Text:        msg.Text,
+			ThreadTS:    msg.ThreadTimestamp,
+			Timestamp:   msg.Timestamp,
+		})
+	}
+
+	// PASSIVE MONITORING — skip when digest is enabled since it already batch-analyzes
+	// all messages more efficiently than individual per-message triage calls.
+	if digestEngine != nil {
+		return
+	}
+
 	select {
 	case ribbitSem <- struct{}{}:
 		defer func() { <-ribbitSem }()
