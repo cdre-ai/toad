@@ -43,6 +43,7 @@ brews:
       owner: cdre-ai
       name: homebrew-tap
       token: "{{ .Env.HOMEBREW_TAP_GITHUB_TOKEN }}"
+    directory: Formula
     name: toad
     homepage: https://github.com/cdre-ai/toad
     description: AI-powered code assistant that lives in Slack
