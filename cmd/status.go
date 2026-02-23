@@ -77,6 +77,8 @@ type apiOpportunity struct {
 	EstSize    string  `json:"est_size"`
 	Channel    string  `json:"channel"`
 	DryRun     bool    `json:"dry_run"`
+	Dismissed  bool    `json:"dismissed"`
+	Reasoning  string  `json:"reasoning,omitempty"`
 	CreatedAt  int64   `json:"created_at"`
 }
 
@@ -234,6 +236,8 @@ func apiDataHandler(db *state.DB, cfg *config.Config) http.HandlerFunc {
 				EstSize:    o.EstSize,
 				Channel:    o.Channel,
 				DryRun:     o.DryRun,
+				Dismissed:  o.Dismissed,
+				Reasoning:  o.Reasoning,
 				CreatedAt:  o.CreatedAt.Unix(),
 			})
 		}
@@ -701,11 +705,18 @@ async function refresh() {
       document.getElementById('opps-count').textContent = opps.length;
       let ohtml = '<table><tr><th style="width:80px">When</th><th>Summary</th><th style="width:70px">Category</th><th style="width:80px">Confidence</th><th style="width:60px">Size</th><th style="width:80px">Status</th></tr>';
       for (const o of opps) {
-        const badge = o.dry_run
-          ? '<span class="badge badge-validating">dry-run</span>'
-          : '<span class="badge badge-done">spawned</span>';
-        ohtml += '<tr><td>' + relTimeAgo(o.created_at, now) + '</td>'
-          + '<td>' + esc(o.summary) + '</td>'
+        let badge;
+        if (o.dismissed) {
+          badge = '<span class="badge badge-failed">dismissed</span>';
+        } else if (o.dry_run) {
+          badge = '<span class="badge badge-validating">dry-run</span>';
+        } else {
+          badge = '<span class="badge badge-done">spawned</span>';
+        }
+        const rowStyle = o.dismissed ? ' style="opacity:0.55"' : '';
+        const reasonTip = o.reasoning ? '<br><span style="color:var(--dim);font-size:11px">' + esc(o.reasoning).substring(0, 120) + '</span>' : '';
+        ohtml += '<tr' + rowStyle + '><td>' + relTimeAgo(o.created_at, now) + '</td>'
+          + '<td style="white-space:normal">' + esc(o.summary) + reasonTip + '</td>'
           + '<td>' + esc(o.category) + '</td>'
           + '<td class="mono">' + (o.confidence * 100).toFixed(0) + '%</td>'
           + '<td>' + esc(o.est_size) + '</td>'

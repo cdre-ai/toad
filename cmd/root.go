@@ -2,11 +2,13 @@ package cmd
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"log/slog"
 	"os"
 	"os/exec"
 	"os/signal"
+	"strings"
 	"sync/atomic"
 	"syscall"
 	"time"
@@ -145,6 +147,9 @@ func runDaemon(cmd *cobra.Command, args []string) error {
 			},
 			func(channel, threadTS, text string) {
 				slackClient.ReplyInThread(channel, threadTS, text)
+			},
+			func(ctx context.Context, opp digest.Opportunity, msg digest.Message) (*digest.InvestigateResult, error) {
+				return investigateOpportunity(ctx, cfg, opp, msg)
 			},
 			stateDB,
 		)
@@ -591,6 +596,143 @@ func handleTadpoleRequest(
 	// Spawn succeeded — Execute will call Track, which overwrites the placeholder.
 	// Don't unclaim on defer.
 	claimed = false
+}
+
+const investigatePrompt = `You are Toad, investigating whether a Slack message describes a fixable code issue.
+
+A batch analyzer flagged this as a potential opportunity:
+Summary: %s
+Original message: %s
+Channel: %s
+Keywords: %s
+Possible files: %s
+
+Your job:
+1. Search the codebase to find the relevant code (use Glob, Grep, Read)
+2. Determine if there's a CLEAR, SMALL fix a coding agent could make
+3. If yes: write a concrete task specification the agent can follow
+4. If no: explain why (too complex, can't find relevant code, needs human decision, etc.)
+
+Respond with ONLY valid JSON:
+{
+  "feasible": true/false,
+  "task_spec": "Concrete description of the fix including file paths and what to change. Only if feasible.",
+  "reasoning": "Brief explanation of your assessment"
+}
+
+Be conservative — only mark feasible if you found the specific code and the fix is clear.
+A vague "probably somewhere in auth" is NOT feasible. You need to find THE file and understand THE issue.`
+
+func investigateOpportunity(ctx context.Context, cfg *config.Config, opp digest.Opportunity, msg digest.Message) (*digest.InvestigateResult, error) {
+	prompt := fmt.Sprintf(investigatePrompt, opp.Summary, msg.Text, msg.ChannelName,
+		strings.Join(opp.Keywords, ", "), strings.Join(opp.FilesHint, ", "))
+
+	args := []string{
+		"--print",
+		"--max-turns", "10",
+		"--output-format", "json",
+		"--model", cfg.Claude.Model,
+		"--allowedTools", "Read,Glob,Grep",
+		"-p", prompt,
+	}
+
+	investigateCtx, cancel := context.WithTimeout(ctx, 2*time.Minute)
+	defer cancel()
+
+	cmd := exec.CommandContext(investigateCtx, "claude", args...)
+	cmd.Dir = cfg.Repo.Path
+
+	output, err := cmd.Output()
+	if err != nil {
+		return nil, fmt.Errorf("claude investigate call failed: %w", err)
+	}
+
+	slog.Debug("investigate raw response", "output", string(output))
+
+	// Parse JSON envelope from --output-format json
+	var envelope struct {
+		Result  string `json:"result"`
+		IsError bool   `json:"is_error"`
+	}
+	resultText := string(output)
+	if err := json.Unmarshal(output, &envelope); err == nil {
+		if envelope.IsError {
+			return nil, fmt.Errorf("claude investigate returned error: %s", envelope.Result)
+		}
+		resultText = envelope.Result
+	}
+
+	// Parse the investigation result JSON from Claude's response
+	var result struct {
+		Feasible bool   `json:"feasible"`
+		TaskSpec string `json:"task_spec"`
+		Reasoning string `json:"reasoning"`
+	}
+
+	// Find JSON object in response (Claude may include prose around it)
+	text := strings.TrimSpace(resultText)
+	start := strings.Index(text, "{")
+	if start < 0 {
+		return &digest.InvestigateResult{
+			Feasible:  false,
+			Reasoning: "investigation returned no JSON response",
+		}, nil
+	}
+	end := findMatchingBrace(text, start)
+	if end < 0 {
+		return &digest.InvestigateResult{
+			Feasible:  false,
+			Reasoning: "investigation returned malformed JSON",
+		}, nil
+	}
+
+	if err := json.Unmarshal([]byte(text[start:end+1]), &result); err != nil {
+		return &digest.InvestigateResult{
+			Feasible:  false,
+			Reasoning: fmt.Sprintf("failed to parse investigation result: %v", err),
+		}, nil
+	}
+
+	return &digest.InvestigateResult{
+		Feasible:  result.Feasible,
+		TaskSpec:  result.TaskSpec,
+		Reasoning: result.Reasoning,
+	}, nil
+}
+
+// findMatchingBrace finds the index of the '}' that matches the '{' at pos,
+// accounting for nested braces and JSON strings.
+func findMatchingBrace(s string, pos int) int {
+	depth := 0
+	inString := false
+	escaped := false
+	for i := pos; i < len(s); i++ {
+		if escaped {
+			escaped = false
+			continue
+		}
+		ch := s[i]
+		if inString {
+			if ch == '\\' {
+				escaped = true
+			} else if ch == '"' {
+				inString = false
+			}
+			continue
+		}
+		switch ch {
+		case '"':
+			inString = true
+		case '{':
+			depth++
+		case '}':
+			depth--
+			if depth == 0 {
+				return i
+			}
+		}
+	}
+	return -1
 }
 
 func checkClaude() error {

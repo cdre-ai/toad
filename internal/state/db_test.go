@@ -487,35 +487,67 @@ func TestDB_DigestOpportunities(t *testing.T) {
 		t.Fatalf("SaveDigestOpportunity: %v", err)
 	}
 
+	// Save a dismissed opportunity
+	err = db.SaveDigestOpportunity(&DigestOpportunity{
+		Summary:    "Refactor auth flow",
+		Category:   "feature",
+		Confidence: 0.96,
+		EstSize:    "small",
+		Channel:    "C789",
+		Message:    "the auth flow is messy",
+		Keywords:   "auth,refactor",
+		DryRun:     false,
+		Dismissed:  true,
+		Reasoning:  "too complex, spans multiple services",
+		CreatedAt:  now.Add(2 * time.Second),
+	})
+	if err != nil {
+		t.Fatalf("SaveDigestOpportunity (dismissed): %v", err)
+	}
+
 	// Retrieve — newest first
 	opps, err = db.RecentDigestOpportunities(10)
 	if err != nil {
 		t.Fatalf("RecentDigestOpportunities: %v", err)
 	}
-	if len(opps) != 2 {
-		t.Fatalf("expected 2 opportunities, got %d", len(opps))
+	if len(opps) != 3 {
+		t.Fatalf("expected 3 opportunities, got %d", len(opps))
 	}
 
-	// First should be the newer one (spawned)
-	if opps[0].Summary != "Add missing validation" {
-		t.Errorf("first opportunity summary: got %q, want %q", opps[0].Summary, "Add missing validation")
+	// First should be the newest (dismissed)
+	if opps[0].Summary != "Refactor auth flow" {
+		t.Errorf("first opportunity summary: got %q, want %q", opps[0].Summary, "Refactor auth flow")
 	}
-	if opps[0].DryRun {
-		t.Error("first opportunity should not be dry-run")
+	if !opps[0].Dismissed {
+		t.Error("first opportunity should be dismissed")
 	}
-	if opps[0].Confidence != 0.99 {
-		t.Errorf("first opportunity confidence: got %f, want 0.99", opps[0].Confidence)
+	if opps[0].Reasoning != "too complex, spans multiple services" {
+		t.Errorf("first opportunity reasoning: got %q", opps[0].Reasoning)
 	}
 
-	// Second should be the older one (dry-run)
-	if opps[1].Summary != "Fix null pointer in handler" {
-		t.Errorf("second opportunity summary: got %q", opps[1].Summary)
+	// Second should be the spawned one
+	if opps[1].Summary != "Add missing validation" {
+		t.Errorf("second opportunity summary: got %q, want %q", opps[1].Summary, "Add missing validation")
 	}
-	if !opps[1].DryRun {
-		t.Error("second opportunity should be dry-run")
+	if opps[1].DryRun {
+		t.Error("second opportunity should not be dry-run")
 	}
-	if opps[1].Channel != "C123" {
-		t.Errorf("second opportunity channel: got %q, want %q", opps[1].Channel, "C123")
+	if opps[1].Dismissed {
+		t.Error("second opportunity should not be dismissed")
+	}
+	if opps[1].Confidence != 0.99 {
+		t.Errorf("second opportunity confidence: got %f, want 0.99", opps[1].Confidence)
+	}
+
+	// Third should be the older one (dry-run)
+	if opps[2].Summary != "Fix null pointer in handler" {
+		t.Errorf("third opportunity summary: got %q", opps[2].Summary)
+	}
+	if !opps[2].DryRun {
+		t.Error("third opportunity should be dry-run")
+	}
+	if opps[2].Channel != "C123" {
+		t.Errorf("third opportunity channel: got %q, want %q", opps[2].Channel, "C123")
 	}
 
 	// Limit works

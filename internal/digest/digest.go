@@ -37,6 +37,16 @@ type Opportunity struct {
 	FilesHint  []string `json:"files_hint"`
 }
 
+// InvestigateResult holds the outcome of a ribbit investigation.
+type InvestigateResult struct {
+	Feasible  bool   // whether ribbit thinks this is a clear, small fix
+	TaskSpec  string // refined task description for the tadpole
+	Reasoning string // why feasible/not (for logging)
+}
+
+// InvestigateFunc investigates an opportunity against the codebase before spawning.
+type InvestigateFunc func(ctx context.Context, opp Opportunity, msg Message) (*InvestigateResult, error)
+
 // SpawnFunc spawns a tadpole task.
 type SpawnFunc func(ctx context.Context, task tadpole.Task) error
 
@@ -54,11 +64,12 @@ type DigestStats struct {
 
 // Engine collects messages and periodically analyzes them for one-shot opportunities.
 type Engine struct {
-	cfg      *config.DigestConfig
-	model    string
-	spawn    SpawnFunc
-	notify   NotifyFunc
-	db       *state.DB
+	cfg         *config.DigestConfig
+	model       string
+	spawn       SpawnFunc
+	notify      NotifyFunc
+	investigate InvestigateFunc
+	db          *state.DB
 
 	mu     sync.Mutex
 	buffer []Message
@@ -76,13 +87,14 @@ type Engine struct {
 }
 
 // New creates a digest engine.
-func New(cfg *config.DigestConfig, triageModel string, spawn SpawnFunc, notify NotifyFunc, db *state.DB) *Engine {
+func New(cfg *config.DigestConfig, triageModel string, spawn SpawnFunc, notify NotifyFunc, investigate InvestigateFunc, db *state.DB) *Engine {
 	return &Engine{
-		cfg:    cfg,
-		model:  triageModel,
-		spawn:  spawn,
-		notify: notify,
-		db:     db,
+		cfg:         cfg,
+		model:       triageModel,
+		spawn:       spawn,
+		notify:      notify,
+		investigate: investigate,
+		db:          db,
 	}
 }
 
@@ -171,11 +183,6 @@ func (e *Engine) flush(ctx context.Context) {
 
 		e.totalOpps.Add(1)
 
-		if !e.trySpawn() {
-			slog.Info("digest hourly spawn limit reached", "limit", e.cfg.MaxAutoSpawnHour)
-			return
-		}
-
 		// Resolve the original message
 		if opp.MessageIdx < 0 || opp.MessageIdx >= len(msgs) {
 			slog.Warn("digest opportunity has invalid message index", "idx", opp.MessageIdx)
@@ -183,7 +190,30 @@ func (e *Engine) flush(ctx context.Context) {
 		}
 		msg := msgs[opp.MessageIdx]
 
-		// Persist opportunity to DB (both dry-run and real)
+		// Investigation gate: have ribbit check the codebase before spawning
+		dismissed := false
+		reasoning := ""
+		taskDescription := msg.Text
+		if e.investigate != nil {
+			result, err := e.investigate(ctx, opp, msg)
+			if err != nil {
+				slog.Warn("digest investigation failed", "error", err, "summary", opp.Summary)
+				dismissed = true
+				reasoning = fmt.Sprintf("investigation error: %v", err)
+			} else if !result.Feasible {
+				slog.Info("digest investigation dismissed opportunity",
+					"summary", opp.Summary, "reasoning", result.Reasoning)
+				dismissed = true
+				reasoning = result.Reasoning
+			} else {
+				slog.Info("digest investigation approved opportunity",
+					"summary", opp.Summary, "reasoning", result.Reasoning)
+				taskDescription = result.TaskSpec
+				reasoning = result.Reasoning
+			}
+		}
+
+		// Persist opportunity to DB (both dry-run and real, dismissed and approved)
 		if e.db != nil {
 			dbOpp := &state.DigestOpportunity{
 				Summary:    opp.Summary,
@@ -194,11 +224,24 @@ func (e *Engine) flush(ctx context.Context) {
 				Message:    msg.Text,
 				Keywords:   strings.Join(opp.Keywords, ","),
 				DryRun:     e.cfg.DryRun,
+				Dismissed:  dismissed,
+				Reasoning:  reasoning,
 				CreatedAt:  time.Now(),
 			}
 			if err := e.db.SaveDigestOpportunity(dbOpp); err != nil {
 				slog.Warn("failed to save digest opportunity", "error", err)
 			}
+		}
+
+		if dismissed {
+			continue
+		}
+
+		// Check hourly spawn limit AFTER investigation — dismissed opportunities
+		// should not consume spawn slots.
+		if !e.trySpawn() {
+			slog.Info("digest hourly spawn limit reached", "limit", e.cfg.MaxAutoSpawnHour)
+			return
 		}
 
 		// In dry-run mode: log and skip spawn/notify
@@ -229,7 +272,7 @@ func (e *Engine) flush(ctx context.Context) {
 		}
 
 		task := tadpole.Task{
-			Description:   msg.Text,
+			Description:   taskDescription,
 			Summary:       opp.Summary,
 			Category:      opp.Category,
 			EstSize:       opp.EstSize,
@@ -275,7 +318,13 @@ Critical rules:
 - Only "bug" and "feature" categories are allowed
 - Only "tiny" (1-2 lines) or "small" (1 file) estimated sizes
 - confidence must be >= 0.95 to be considered
-- message_index is 0-based, referring to the message list above`
+- message_index is 0-based, referring to the message list above
+
+Structured alerts (Sentry, CI, monitoring bots):
+- Error alerts with exception names, stack traces, or file paths ARE specific and concrete
+- A coding agent CAN investigate an exception class, trace the logic, and propose a fix
+- Treat these as bug reports — the exception/error message IS the specification
+- Example: a Sentry alert with "SsoAuthException: Tenant ID mismatch" and a file path is actionable`
 
 func (e *Engine) analyze(ctx context.Context, msgs []Message) ([]Opportunity, error) {
 	// Format messages as numbered list

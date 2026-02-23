@@ -108,10 +108,25 @@ func migrate(db *sql.DB) error {
 			message    TEXT,
 			keywords   TEXT,
 			dry_run    BOOLEAN NOT NULL DEFAULT TRUE,
+			dismissed  BOOLEAN NOT NULL DEFAULT FALSE,
+			reasoning  TEXT NOT NULL DEFAULT '',
 			created_at DATETIME NOT NULL
 		);
 	`)
-	return err
+	if err != nil {
+		return err
+	}
+
+	// Add columns for existing databases that predate the investigation gate.
+	// SQLite has no IF NOT EXISTS for ALTER TABLE, so check first.
+	var count int
+	_ = db.QueryRow(`SELECT COUNT(*) FROM pragma_table_info('digest_opportunities') WHERE name = 'dismissed'`).Scan(&count)
+	if count == 0 {
+		db.Exec(`ALTER TABLE digest_opportunities ADD COLUMN dismissed BOOLEAN NOT NULL DEFAULT FALSE`)
+		db.Exec(`ALTER TABLE digest_opportunities ADD COLUMN reasoning TEXT NOT NULL DEFAULT ''`)
+	}
+
+	return nil
 }
 
 // SaveRun inserts or replaces a run in the database.
@@ -364,16 +379,19 @@ type DigestOpportunity struct {
 	Message    string
 	Keywords   string
 	DryRun     bool
+	Dismissed  bool
+	Reasoning  string
 	CreatedAt  time.Time
 }
 
 // SaveDigestOpportunity persists a digest opportunity to the database.
 func (d *DB) SaveDigestOpportunity(opp *DigestOpportunity) error {
 	_, err := d.db.Exec(`
-		INSERT INTO digest_opportunities (summary, category, confidence, est_size, channel, message, keywords, dry_run, created_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		INSERT INTO digest_opportunities (summary, category, confidence, est_size, channel, message, keywords, dry_run, dismissed, reasoning, created_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		opp.Summary, opp.Category, opp.Confidence, opp.EstSize,
-		opp.Channel, opp.Message, opp.Keywords, opp.DryRun, opp.CreatedAt,
+		opp.Channel, opp.Message, opp.Keywords, opp.DryRun,
+		opp.Dismissed, opp.Reasoning, opp.CreatedAt,
 	)
 	return err
 }
@@ -381,7 +399,7 @@ func (d *DB) SaveDigestOpportunity(opp *DigestOpportunity) error {
 // RecentDigestOpportunities returns the most recent digest opportunities, newest first.
 func (d *DB) RecentDigestOpportunities(limit int) ([]*DigestOpportunity, error) {
 	rows, err := d.db.Query(
-		"SELECT id, summary, category, confidence, est_size, channel, message, keywords, dry_run, created_at FROM digest_opportunities ORDER BY created_at DESC LIMIT ?",
+		"SELECT id, summary, category, confidence, est_size, channel, message, keywords, dry_run, dismissed, reasoning, created_at FROM digest_opportunities ORDER BY created_at DESC LIMIT ?",
 		limit,
 	)
 	if err != nil {
@@ -392,7 +410,7 @@ func (d *DB) RecentDigestOpportunities(limit int) ([]*DigestOpportunity, error) 
 	var opps []*DigestOpportunity
 	for rows.Next() {
 		var opp DigestOpportunity
-		if err := rows.Scan(&opp.ID, &opp.Summary, &opp.Category, &opp.Confidence, &opp.EstSize, &opp.Channel, &opp.Message, &opp.Keywords, &opp.DryRun, &opp.CreatedAt); err != nil {
+		if err := rows.Scan(&opp.ID, &opp.Summary, &opp.Category, &opp.Confidence, &opp.EstSize, &opp.Channel, &opp.Message, &opp.Keywords, &opp.DryRun, &opp.Dismissed, &opp.Reasoning, &opp.CreatedAt); err != nil {
 			return nil, err
 		}
 		opps = append(opps, &opp)
