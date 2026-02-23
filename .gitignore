@@ -1,3 +1,33 @@
-toad
-.toad.yaml
+# Binaries
+/toad
+*.exe
+*.dll
+*.so
+*.dylib
+
+# Claude Code
+.claude/
+
+# Test binary
+*.test
+
+# Output of go coverage
+*.out
+
+# IDE
 .idea/
+.vscode/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Build
+dist/
+
+# Local config (don't commit tokens!)
+.env
+*.local
+.toad.yaml

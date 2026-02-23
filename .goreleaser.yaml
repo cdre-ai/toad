@@ -1,0 +1,58 @@
+version: 2
+
+before:
+  hooks:
+    - go mod tidy
+
+builds:
+  - main: .
+    binary: toad
+    env:
+      - CGO_ENABLED=0
+    goos:
+      - linux
+      - darwin
+    goarch:
+      - amd64
+      - arm64
+    ldflags:
+      - -s -w
+      - -X github.com/hergen/toad/cmd.Version={{.Version}}
+      - -X github.com/hergen/toad/cmd.Commit={{.Commit}}
+      - -X github.com/hergen/toad/cmd.BuildDate={{.Date}}
+
+archives:
+  - format: tar.gz
+    name_template: "toad_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+
+checksum:
+  name_template: "checksums.txt"
+
+changelog:
+  sort: asc
+  filters:
+    exclude:
+      - "^docs:"
+      - "^test:"
+      - "^ci:"
+      - "^chore:"
+      - "^Merge"
+
+brews:
+  - repository:
+      owner: cdre-ai
+      name: homebrew-tap
+      token: "{{ .Env.HOMEBREW_TAP_GITHUB_TOKEN }}"
+    name: toad
+    homepage: https://github.com/cdre-ai/toad
+    description: AI-powered code assistant that lives in Slack
+    license: MIT
+    install: |
+      bin.install "toad"
+    test: |
+      system "#{bin}/toad", "version"
+
+release:
+  github:
+    owner: cdre-ai
+    name: toad

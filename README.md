@@ -41,16 +41,25 @@ Slack message → Triage (Haiku, ~1s) → Route by category:
 
 ## 🚀 Install
 
+### Homebrew (recommended)
+
 ```bash
-go install github.com/hergen/toad@latest
+brew tap cdre-ai/tap
+brew install toad
 ```
 
-Or build from source:
+### Go install
 
 ```bash
-git clone https://github.com/hergen/toad.git
+go install github.com/cdre-ai/toad@latest
+```
+
+### Build from source
+
+```bash
+git clone https://github.com/cdre-ai/toad.git
 cd toad
-go build -o toad .
+make build
 ```
 
 ## 🔧 Setup
@@ -222,6 +231,8 @@ cmd/
   run.go           toad run (CLI one-shot)
   init.go          toad init (setup wizard)
   status.go        toad status (web dashboard)
+  version.go       toad version (build info via ldflags)
+  update.go        toad update (self-update via Homebrew)
 
 internal/
   slack/           Socket Mode client, event routing, dedup
@@ -231,6 +242,7 @@ internal/
   state/           In-memory + SQLite state, crash recovery
   reviewer/        PR review comment watcher, fix tadpole spawning
   digest/          Toad King: batch analysis, auto-spawn with guardrails
+  update/          Version checking and self-update
   config/          YAML config with cascading defaults
   tui/             Shared theme for init wizard
   log/             Structured logging setup
@@ -249,10 +261,18 @@ Separate semaphores keep Q&A responsive while tadpoles run:
 ## 🛠️ Development
 
 ```bash
-go build ./...              # Build
-go test ./...               # Test (uses in-memory SQLite)
-go vet ./...                # Lint
-go test ./internal/state/   # Test a single package
+make build                  # Build binary
+make test                   # Run tests with race detector
+make lint                   # Run golangci-lint
+make vet                    # Run go vet
+make fmt                    # Format code
+make clean                  # Remove binary and dist/
+```
+
+To test a single package:
+
+```bash
+go test ./internal/state/
 ```
 
 ## 📄 License
