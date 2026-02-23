@@ -324,23 +324,58 @@ func (e *Engine) analyze(ctx context.Context, msgs []Message) ([]Opportunity, er
 
 func parseOpportunities(data []byte) ([]Opportunity, error) {
 	text := strings.TrimSpace(string(data))
-	text = strings.TrimPrefix(text, "```json")
-	text = strings.TrimPrefix(text, "```")
-	text = strings.TrimSuffix(text, "```")
-	text = strings.TrimSpace(text)
 
-	// Find JSON array
+	// Find the JSON array by matching brackets (handles trailing prose from Haiku)
 	start := strings.Index(text, "[")
-	end := strings.LastIndex(text, "]")
-	if start >= 0 && end > start {
-		text = text[start : end+1]
+	if start < 0 {
+		return nil, fmt.Errorf("parsing digest opportunities: no JSON array found")
 	}
+	end := findMatchingBracket(text, start)
+	if end < 0 {
+		return nil, fmt.Errorf("parsing digest opportunities: unmatched '['")
+	}
+	text = text[start : end+1]
 
 	var opps []Opportunity
 	if err := json.Unmarshal([]byte(text), &opps); err != nil {
 		return nil, fmt.Errorf("parsing digest opportunities: %w", err)
 	}
 	return opps, nil
+}
+
+// findMatchingBracket finds the index of the ']' that matches the '[' at pos,
+// accounting for nested brackets and JSON strings.
+func findMatchingBracket(s string, pos int) int {
+	depth := 0
+	inString := false
+	escaped := false
+	for i := pos; i < len(s); i++ {
+		if escaped {
+			escaped = false
+			continue
+		}
+		ch := s[i]
+		if inString {
+			if ch == '\\' {
+				escaped = true
+			} else if ch == '"' {
+				inString = false
+			}
+			continue
+		}
+		switch ch {
+		case '"':
+			inString = true
+		case '[':
+			depth++
+		case ']':
+			depth--
+			if depth == 0 {
+				return i
+			}
+		}
+	}
+	return -1
 }
 
 func (e *Engine) passesGuardrails(opp Opportunity) bool {
