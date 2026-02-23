@@ -186,7 +186,7 @@ func (r *Runner) Execute(ctx context.Context, task Task) error {
 		prURL = "(pushed to existing PR)"
 	} else {
 		r.updateStatus(task, statusTS, ":rocket: Opening PR...")
-		prURL, err = ship(ctx, wt.Path, wt.Branch, task)
+		prURL, err = ship(ctx, wt.Path, wt.Branch, task, r.cfg.Repo.AutoMerge)
 		if err != nil {
 			return fail(fmt.Sprintf("shipping: %s", err))
 		}
@@ -260,7 +260,7 @@ func (r *Runner) swapReact(task Task, remove, add string) {
 	r.slack.SwapReaction(task.SlackChannel, task.SlackThreadTS, remove, add)
 }
 
-func ship(ctx context.Context, worktreePath, branch string, task Task) (string, error) {
+func ship(ctx context.Context, worktreePath, branch string, task Task, autoMerge bool) (string, error) {
 	// Push branch to origin
 	slog.Info("pushing branch", "branch", branch)
 	pushCmd := exec.CommandContext(ctx, "git", "push", "-u", "origin", branch)
@@ -295,6 +295,23 @@ func ship(ctx context.Context, worktreePath, branch string, task Task) (string, 
 	}
 
 	prURL := strings.TrimSpace(prStdout.String())
+
+	// Enable auto-merge if configured — the PR will merge automatically once
+	// all branch protection requirements (reviews, CI) are satisfied.
+	if autoMerge {
+		slog.Info("enabling auto-merge", "pr", prURL)
+		mergeCmd := exec.CommandContext(ctx, "gh", "pr", "merge", "--auto", "--squash", branch)
+		mergeCmd.Dir = worktreePath
+		var mergeStderr bytes.Buffer
+		mergeCmd.Stderr = &mergeStderr
+		if err := mergeCmd.Run(); err != nil {
+			// Non-fatal: PR is created, auto-merge is a bonus.
+			// This can fail if the repo doesn't have auto-merge enabled in settings.
+			slog.Warn("failed to enable auto-merge", "error", err,
+				"stderr", strings.TrimSpace(mergeStderr.String()))
+		}
+	}
+
 	return prURL, nil
 }
 

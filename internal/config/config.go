@@ -35,6 +35,7 @@ type RepoConfig struct {
 	TestCommand   string          `yaml:"test_command"`
 	LintCommand   string          `yaml:"lint_command"`
 	DefaultBranch string          `yaml:"default_branch"`
+	AutoMerge     bool            `yaml:"auto_merge"`
 	Services      []ServiceConfig `yaml:"services"`
 }
 
