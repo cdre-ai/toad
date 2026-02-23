@@ -84,7 +84,7 @@ func RunClaude(ctx context.Context, opts ClaudeRunOpts) (*ClaudeRunOutput, error
 		Result    string  `json:"result"`
 		IsError   bool    `json:"is_error"`
 		SessionID string  `json:"session_id"`
-		CostUSD   float64 `json:"cost_usd"`
+		CostUSD   float64 `json:"total_cost_usd"`
 	}
 	if err := json.Unmarshal(output, &envelope); err != nil {
 		// Fall back to raw text

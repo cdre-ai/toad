@@ -176,6 +176,13 @@ func (w *Watcher) checkPR(ctx context.Context, watch *state.PRWatch) error {
 		ExistingBranch: watch.Branch,
 	}
 
+	// Update last seen comment ID BEFORE spawning to prevent duplicate spawns
+	// if the spawn is slow or the next poll fires while a tadpole is running.
+	maxID := newComments[len(newComments)-1].ID
+	if err := w.db.UpdatePRWatchLastComment(watch.PRNumber, maxID); err != nil {
+		return fmt.Errorf("updating last comment ID: %w", err)
+	}
+
 	// Notify in Slack
 	if w.slack != nil && watch.SlackChannel != "" && watch.SlackThread != "" {
 		w.slack.ReplyInThread(watch.SlackChannel, watch.SlackThread,
@@ -193,9 +200,7 @@ func (w *Watcher) checkPR(ctx context.Context, watch *state.PRWatch) error {
 		return err
 	}
 
-	// Update last seen comment ID and increment fix count
-	maxID := newComments[len(newComments)-1].ID
-	return w.db.UpdatePRWatchLastComment(watch.PRNumber, maxID)
+	return nil
 }
 
 func (w *Watcher) getReviewComments(ctx context.Context, prNumber int) ([]ghComment, error) {
