@@ -277,8 +277,8 @@ func ship(ctx context.Context, worktreePath, branch string, task Task, autoMerge
 		title = title[:67] + "..."
 	}
 
-	body := fmt.Sprintf("## Summary\n\n%s\n\n_Category: %s | Size: %s_\n\n---\n:frog: Created by toad tadpole",
-		task.Description, task.Category, task.EstSize)
+	body := fmt.Sprintf("## Summary\n\n%s\n\n_Category: %s | Size: %s_\n\n<details>\n<summary>Slack context</summary>\n\n%s\n\n</details>\n\n---\n:frog: Created by toad tadpole",
+		task.Summary, task.Category, task.EstSize, task.Description)
 
 	slog.Info("creating PR", "title", title, "branch", branch)
 	prCmd := exec.CommandContext(ctx, "gh", "pr", "create",

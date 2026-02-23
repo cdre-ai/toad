@@ -612,14 +612,14 @@ func buildTaskDescription(triggerText string, threadContext []string) string {
 	}
 
 	var sb strings.Builder
-	sb.WriteString("## Slack conversation\n\n")
+	sb.WriteString("Slack conversation:\n\n")
 	for _, msg := range threadContext {
 		text := strings.TrimSpace(msg)
 		if text == "" {
 			continue
 		}
 		sb.WriteString(text)
-		sb.WriteString("\n---\n")
+		sb.WriteString("\n\n")
 	}
 
 	// Add the trigger if it's not already in the thread (top-level mentions
@@ -635,11 +635,11 @@ func buildTaskDescription(triggerText string, threadContext []string) string {
 		}
 		if !alreadyIncluded {
 			sb.WriteString(triggerTrimmed)
-			sb.WriteString("\n---\n")
+			sb.WriteString("\n\n")
 		}
 	}
 
-	return sb.String()
+	return strings.TrimSpace(sb.String())
 }
 
 const investigatePrompt = `You are Toad, investigating whether a Slack message describes a fixable code issue.
