@@ -88,9 +88,9 @@ func handleMessage(ctx context.Context, c *Client, ev *slackevents.MessageEvent)
 		slog.Debug("skipping: unmonitored channel", "channel", ev.Channel)
 		return
 	}
-	// Ignore bot messages and message edits/deletes
-	if ev.BotID != "" || ev.SubType != "" {
-		slog.Debug("skipping: bot message or subtype", "bot_id", ev.BotID, "subtype", ev.SubType)
+	// Ignore message edits/deletes (but let bot messages through for digest)
+	if ev.SubType != "" && ev.SubType != "bot_message" {
+		slog.Debug("skipping: message subtype", "subtype", ev.SubType)
 		return
 	}
 	// Skip @mentions — these are handled by handleAppMention
@@ -103,7 +103,8 @@ func handleMessage(ctx context.Context, c *Client, ev *slackevents.MessageEvent)
 		return
 	}
 
-	triggered := hasKeywordTrigger(ev.Text, c.triggers.Keywords)
+	isBot := ev.BotID != ""
+	triggered := !isBot && hasKeywordTrigger(ev.Text, c.triggers.Keywords)
 
 	msg := &IncomingMessage{
 		Text:           ev.Text,
@@ -113,10 +114,10 @@ func handleMessage(ctx context.Context, c *Client, ev *slackevents.MessageEvent)
 		ThreadTimestamp: ev.ThreadTimeStamp,
 		IsMention:      false,
 		IsTriggered:    triggered,
-		IsBot:          false,
+		IsBot:          isBot,
 	}
 
-	slog.Debug("dispatching message", "channel", ev.Channel, "triggered", triggered)
+	slog.Debug("dispatching message", "channel", ev.Channel, "triggered", triggered, "bot", isBot)
 	if c.handler != nil {
 		c.handler(ctx, msg)
 	}

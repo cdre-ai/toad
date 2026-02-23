@@ -264,13 +264,7 @@ func handleMessage(
 		return
 	}
 
-	// Skip bot messages (after tadpole check above)
-	if msg.IsBot {
-		slog.Debug("handler: skipping bot message", "user", msg.User, "channel", msg.Channel)
-		return
-	}
-
-	// EXPLICIT TRIGGER: @toad mention or reaction/keyword trigger
+	// EXPLICIT TRIGGER: @toad mention or reaction/keyword trigger (never from bots)
 	if msg.IsMention || msg.IsTriggered {
 		slog.Debug("handler: triggered path", "mention", msg.IsMention, "triggered", msg.IsTriggered, "channel", channelName)
 
@@ -287,7 +281,8 @@ func handleMessage(
 	}
 
 	// Feed untriggered messages to digest engine (Toad King) for batch analysis.
-	// Triggered messages are handled individually above — no need to double-process.
+	// This includes bot messages (Sentry alerts, CI failures, etc.) — the digest
+	// will determine if they're actionable. Triggered messages are handled above.
 	if digestEngine != nil {
 		digestEngine.Collect(digest.Message{
 			Channel:     msg.Channel,
@@ -297,6 +292,11 @@ func handleMessage(
 			ThreadTS:    msg.ThreadTimestamp,
 			Timestamp:   msg.Timestamp,
 		})
+	}
+
+	// Skip bot messages from individual triage/passive monitoring
+	if msg.IsBot {
+		return
 	}
 
 	// PASSIVE MONITORING — skip when digest is enabled since it already batch-analyzes
