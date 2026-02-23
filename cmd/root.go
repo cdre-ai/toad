@@ -414,8 +414,13 @@ func handleTriggered(
 			}
 		}()
 
+		// Build task description from the full thread context, not just the trigger
+		// message. The trigger is often just "@toad fix!" — the actual error details
+		// (stack traces, file paths) are in the parent/earlier messages.
+		taskDescription := buildTaskDescription(msg.Text, msg.ThreadContext)
+
 		task := tadpole.Task{
-			Description:   msg.Text,
+			Description:   taskDescription,
 			Summary:       result.Summary,
 			Category:      result.Category,
 			EstSize:       result.EstSize,
@@ -572,7 +577,7 @@ func handleTadpoleRequest(
 	}
 
 	task := tadpole.Task{
-		Description:   threadText,
+		Description:   buildTaskDescription(threadText, threadMsgs),
 		Summary:       triageResult.Summary,
 		Category:      triageResult.Category,
 		EstSize:       triageResult.EstSize,
@@ -596,6 +601,45 @@ func handleTadpoleRequest(
 	// Spawn succeeded — Execute will call Track, which overwrites the placeholder.
 	// Don't unclaim on defer.
 	claimed = false
+}
+
+// buildTaskDescription assembles a full task description from the trigger message
+// and thread context. The trigger message alone is often just "@toad fix!" — the
+// actual error details (stack traces, file paths, Sentry alerts) live in the thread.
+func buildTaskDescription(triggerText string, threadContext []string) string {
+	if len(threadContext) == 0 {
+		return triggerText
+	}
+
+	var sb strings.Builder
+	sb.WriteString("## Slack conversation\n\n")
+	for _, msg := range threadContext {
+		text := strings.TrimSpace(msg)
+		if text == "" {
+			continue
+		}
+		sb.WriteString(text)
+		sb.WriteString("\n---\n")
+	}
+
+	// Add the trigger if it's not already in the thread (top-level mentions
+	// use FetchRecentMessages which doesn't include the trigger itself)
+	triggerTrimmed := strings.TrimSpace(triggerText)
+	if triggerTrimmed != "" {
+		alreadyIncluded := false
+		for _, msg := range threadContext {
+			if strings.Contains(msg, triggerTrimmed) {
+				alreadyIncluded = true
+				break
+			}
+		}
+		if !alreadyIncluded {
+			sb.WriteString(triggerTrimmed)
+			sb.WriteString("\n---\n")
+		}
+	}
+
+	return sb.String()
 }
 
 const investigatePrompt = `You are Toad, investigating whether a Slack message describes a fixable code issue.
@@ -636,7 +680,7 @@ func investigateOpportunity(ctx context.Context, cfg *config.Config, opp digest.
 		"-p", prompt,
 	}
 
-	investigateCtx, cancel := context.WithTimeout(ctx, 2*time.Minute)
+	investigateCtx, cancel := context.WithTimeout(ctx, 5*time.Minute)
 	defer cancel()
 
 	cmd := exec.CommandContext(investigateCtx, "claude", args...)

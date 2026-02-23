@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"strings"
 	"sync"
 	"time"
 
@@ -165,7 +166,7 @@ func (c *Client) FetchThreadMessages(channel, threadTS string) ([]string, error)
 	}
 	var texts []string
 	for _, m := range msgs {
-		texts = append(texts, m.Text)
+		texts = append(texts, extractFullText(m.Msg))
 	}
 	return texts, nil
 }
@@ -186,9 +187,135 @@ func (c *Client) FetchRecentMessages(channel, beforeTS string, limit int) ([]str
 	// Slack returns newest-first; reverse to chronological order
 	texts := make([]string, len(resp.Messages))
 	for i, m := range resp.Messages {
-		texts[len(resp.Messages)-1-i] = m.Text
+		texts[len(resp.Messages)-1-i] = extractFullText(m.Msg)
 	}
 	return texts, nil
+}
+
+// extractFullText builds a complete text representation of a Slack message,
+// including content from blocks and attachments that bots (Sentry, CI, etc.)
+// typically use for rich formatting like stack traces and error details.
+func extractFullText(m slack.Msg) string {
+	var parts []string
+
+	// Start with the plain text field
+	if m.Text != "" {
+		parts = append(parts, m.Text)
+	}
+
+	// Extract text from Block Kit blocks
+	for _, block := range m.Blocks.BlockSet {
+		switch b := block.(type) {
+		case *slack.SectionBlock:
+			if b.Text != nil && b.Text.Text != "" {
+				parts = appendUnique(parts, b.Text.Text)
+			}
+			for _, f := range b.Fields {
+				if f != nil && f.Text != "" {
+					parts = appendUnique(parts, f.Text)
+				}
+			}
+		case *slack.HeaderBlock:
+			if b.Text != nil && b.Text.Text != "" {
+				parts = appendUnique(parts, b.Text.Text)
+			}
+		case *slack.RichTextBlock:
+			if text := extractRichText(b); text != "" {
+				parts = appendUnique(parts, text)
+			}
+		case *slack.ContextBlock:
+			for _, elem := range b.ContextElements.Elements {
+				if te, ok := elem.(*slack.TextBlockObject); ok && te.Text != "" {
+					parts = appendUnique(parts, te.Text)
+				}
+			}
+		}
+	}
+
+	// Extract text from attachments (legacy format — Sentry, GitHub, etc. use these heavily)
+	for _, att := range m.Attachments {
+		if att.Pretext != "" {
+			parts = appendUnique(parts, att.Pretext)
+		}
+		if att.Title != "" {
+			parts = appendUnique(parts, att.Title)
+		}
+		if att.Text != "" {
+			parts = appendUnique(parts, att.Text)
+		}
+		for _, f := range att.Fields {
+			fieldText := f.Title + ": " + f.Value
+			if f.Title == "" {
+				fieldText = f.Value
+			}
+			if fieldText != "" {
+				parts = appendUnique(parts, fieldText)
+			}
+		}
+		if att.Fallback != "" && len(parts) == 0 {
+			// Only use fallback if we got nothing else
+			parts = append(parts, att.Fallback)
+		}
+	}
+
+	return strings.Join(parts, "\n")
+}
+
+// extractRichText pulls plain text from a RichTextBlock's nested elements.
+func extractRichText(b *slack.RichTextBlock) string {
+	var sb strings.Builder
+	for _, elem := range b.Elements {
+		switch section := elem.(type) {
+		case *slack.RichTextSection:
+			for _, se := range section.Elements {
+				switch te := se.(type) {
+				case *slack.RichTextSectionTextElement:
+					sb.WriteString(te.Text)
+				case *slack.RichTextSectionLinkElement:
+					if te.Text != "" {
+						sb.WriteString(te.Text)
+					} else {
+						sb.WriteString(te.URL)
+					}
+				}
+			}
+		case *slack.RichTextPreformatted:
+			for _, se := range section.Elements {
+				if te, ok := se.(*slack.RichTextSectionTextElement); ok {
+					sb.WriteString(te.Text)
+				}
+			}
+		case *slack.RichTextQuote:
+			for _, se := range section.Elements {
+				if te, ok := se.(*slack.RichTextSectionTextElement); ok {
+					sb.WriteString(te.Text)
+				}
+			}
+		case *slack.RichTextList:
+			for _, listElem := range section.Elements {
+				if listSection, ok := listElem.(*slack.RichTextSection); ok {
+					for _, se := range listSection.Elements {
+						if te, ok := se.(*slack.RichTextSectionTextElement); ok {
+							sb.WriteString(te.Text)
+						}
+					}
+					sb.WriteString("\n")
+				}
+			}
+		}
+	}
+	return strings.TrimSpace(sb.String())
+}
+
+// appendUnique appends text only if it's not already a substring of an existing part.
+// Prevents duplication since .Text is often a subset of blocks/attachments content.
+func appendUnique(parts []string, text string) []string {
+	for _, existing := range parts {
+		if strings.Contains(existing, text) {
+			return parts
+		}
+	}
+	return append(parts, text)
 }
 
 // FetchMessage retrieves a single message by channel and timestamp.
