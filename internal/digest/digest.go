@@ -340,6 +340,13 @@ func (e *Engine) processOpportunities(ctx context.Context, msgs []Message, oppor
 			IssueRef:      issueRef,
 		}
 
+		// Post a message explaining the autonomous detection before spawning,
+		// so people understand why a tadpole is working on this thread.
+		if e.notify != nil {
+			e.notify(msg.Channel, threadTS,
+				":crown: Spotted this while monitoring the channel — sending a tadpole to investigate and fix.")
+		}
+
 		if err := e.spawn(ctx, task); err != nil {
 			slog.Error("digest spawn failed", "error", err, "summary", opp.Summary)
 			if e.notify != nil {
@@ -348,8 +355,6 @@ func (e *Engine) processOpportunities(ctx context.Context, msgs []Message, oppor
 			}
 		} else {
 			e.totalSpawns.Add(1)
-			// React on original message so people see toad is working on it.
-			// The runner handles thread replies (status message + progress updates).
 			if e.react != nil {
 				e.react(msg.Channel, msg.Timestamp, "hatching_chick")
 			}
