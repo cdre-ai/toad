@@ -29,8 +29,9 @@ func init() {
 // outputConfig is a purpose-built struct for marshaling .toad.yaml.
 // It omits log.file so runtime defaults apply.
 type outputConfig struct {
-	Slack outputSlackConfig `yaml:"slack"`
-	Repos []outputRepoConfig `yaml:"repos"`
+	Slack  outputSlackConfig  `yaml:"slack"`
+	Repos  []outputRepoConfig `yaml:"repos"`
+	Digest outputDigestConfig `yaml:"digest"`
 }
 
 type outputSlackConfig struct {
@@ -42,6 +43,11 @@ type outputSlackConfig struct {
 type outputRepoConfig struct {
 	Name string `yaml:"name"`
 	Path string `yaml:"path"`
+}
+
+type outputDigestConfig struct {
+	Enabled bool `yaml:"enabled"`
+	DryRun  bool `yaml:"dry_run"`
 }
 
 func runInit(cmd *cobra.Command, args []string) error {
@@ -75,13 +81,15 @@ func runInit(cmd *cobra.Command, args []string) error {
 		}
 	}
 
-	// Form 2: Slack setup guide → token inputs → repo config
+	// Form 2: Slack setup guide → token inputs → repo config → Toad King
 	var appToken, botToken string
 
 	// Default repo path to cwd
 	cwd, _ := os.Getwd()
 	repoPath := cwd
 	repoName := filepath.Base(cwd)
+
+	var digestLive bool
 
 	err := huh.NewForm(
 		huh.NewGroup(
@@ -168,6 +176,26 @@ For private channels, use /invite @YourBot.`).
 					return nil
 				}),
 		),
+		huh.NewGroup(
+			huh.NewNote().
+				Title("Toad King").
+				Description(`Toad King passively monitors your Slack channels and identifies
+potential bugs that could be fixed automatically.
+
+By default, it runs in dry-run mode — it will analyze messages
+and show what it would do in the dashboard, but won't spawn
+any tadpoles or create PRs.
+
+You can enable live mode now or later in .toad.yaml.`).
+				Next(true).
+				NextLabel("Continue"),
+			huh.NewConfirm().
+				Title("Enable Toad King live mode?").
+				Description("Live mode auto-spawns tadpoles for high-confidence bugs. Dry-run is always on.").
+				Affirmative("Yes, enable live mode").
+				Negative("No, dry-run only").
+				Value(&digestLive),
+		),
 	).
 		WithProgramOptions(formOpts...).
 		WithTheme(theme).
@@ -194,6 +222,10 @@ For private channels, use /invite @YourBot.`).
 		},
 		Repos: []outputRepoConfig{
 			{Name: strings.TrimSpace(repoName), Path: absRepoPath},
+		},
+		Digest: outputDigestConfig{
+			Enabled: true,
+			DryRun:  !digestLive,
 		},
 	}
 

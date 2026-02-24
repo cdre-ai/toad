@@ -97,6 +97,49 @@ func TestBuildRetryPrompt_BothFailed(t *testing.T) {
 	}
 }
 
+func TestSanitizeForPR_RedactsSecrets(t *testing.T) {
+	tests := []struct {
+		name  string
+		input string
+		want  string
+	}{
+		{"slack bot token", "token is xoxb-1234-5678-abcdef", "token is [REDACTED]"},
+		{"slack app token", "use xapp-1-ABC-1234567890abcdef", "use [REDACTED]"},
+		{"slack user token", "xoxp-1234-5678-abcdefghij", "[REDACTED]"},
+		{"openai key", "key: sk-abc123def456ghi789jkl012", "key: [REDACTED]"},
+		{"github pat", "ghp_aBcDeFgHiJkLmNoPqRsTuVwXyZ1234567890", "[REDACTED]"},
+		{"gitlab pat", "glpat-abcdefghij1234567890", "[REDACTED]"},
+		{"aws key", "AKIAIOSFODNN7EXAMPLE", "[REDACTED]"},
+		{"bearer token", "Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.abc", "[REDACTED]"},
+		{"token param", "token=abc123def456ghi789jkl012", "[REDACTED]"},
+		{"linear api", "lin_api_abc123def456", "[REDACTED]"},
+		{"no secrets", "just a normal bug report about handler.go", "just a normal bug report about handler.go"},
+		{"multiple secrets", "xoxb-123-456-abcdef and sk-abcdefghijklmnopqrstuvwx", "[REDACTED] and [REDACTED]"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := sanitizeForPR(tt.input, 4000)
+			if got != tt.want {
+				t.Errorf("sanitizeForPR(%q) = %q, want %q", tt.input, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestSanitizeForPR_Truncation(t *testing.T) {
+	// Use runes, not bytes — emoji should count as 1
+	input := strings.Repeat("🐸", 50) + "tail"
+	got := sanitizeForPR(input, 50)
+	runes := []rune(got)
+	// 50 frog emojis + "\n\n_(truncated)_" = 50 + 15 = 65 runes
+	if len(runes) != 65 {
+		t.Errorf("expected 65 runes, got %d", len(runes))
+	}
+	if !strings.HasSuffix(got, "_(truncated)_") {
+		t.Error("should end with truncation marker")
+	}
+}
+
 func TestBuildBranchSlug_WithIssueRef(t *testing.T) {
 	task := Task{
 		Summary: "fix nil pointer in handler",

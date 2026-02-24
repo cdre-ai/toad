@@ -40,11 +40,10 @@ limits:
   max_turns: 30                # Claude Code max turns per tadpole
   timeout_minutes: 10          # Kill tadpole after this
   max_files_changed: 5         # Abort if too many files touched
-  max_budget_usd: 1.00         # Per-tadpole cost cap
   max_retries: 1               # Test/lint failure retries
 
 triage:
-  model: "haiku"               # Fast + cheap for classification
+  model: "haiku"               # Fast classification (~1s)
   auto_spawn: false            # Require explicit 🐸 trigger for code changes
 
 claude:

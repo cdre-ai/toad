@@ -1,6 +1,7 @@
 package state
 
 import (
+	"context"
 	"database/sql"
 	"encoding/json"
 	"fmt"
@@ -12,6 +13,13 @@ import (
 
 	_ "modernc.org/sqlite" // SQLite driver
 )
+
+// dbTimeout is the default timeout for hot-path DB operations.
+const dbTimeout = 10 * time.Second
+
+func dbCtx() (context.Context, context.CancelFunc) {
+	return context.WithTimeout(context.Background(), dbTimeout)
+}
 
 // DB wraps SQLite for persistent state.
 type DB struct {
@@ -163,7 +171,9 @@ func (d *DB) SaveRun(run *Run) error {
 		}
 	}
 
-	_, err := d.db.Exec(`
+	ctx, cancel := dbCtx()
+	defer cancel()
+	_, err := d.db.ExecContext(ctx, `
 		INSERT OR REPLACE INTO runs (id, status, slack_channel, slack_thread, branch, worktree_path, task, repo_name, started_at, result_json, updated_at)
 		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		run.ID, run.Status, run.SlackChannel, run.SlackThreadTS,
@@ -175,7 +185,9 @@ func (d *DB) SaveRun(run *Run) error {
 
 // UpdateStatus updates the status of a run.
 func (d *DB) UpdateStatus(runID, status string) error {
-	_, err := d.db.Exec(
+	ctx, cancel := dbCtx()
+	defer cancel()
+	_, err := d.db.ExecContext(ctx,
 		"UPDATE runs SET status = ?, updated_at = ? WHERE id = ?",
 		status, time.Now(), runID,
 	)
@@ -194,7 +206,9 @@ func (d *DB) CompleteRun(runID string, result *RunResult) error {
 		return fmt.Errorf("marshaling result: %w", err)
 	}
 
-	_, err = d.db.Exec(
+	ctx, cancel := dbCtx()
+	defer cancel()
+	_, err = d.db.ExecContext(ctx,
 		"UPDATE runs SET status = ?, result_json = ?, updated_at = ? WHERE id = ?",
 		status, string(resultJSON), time.Now(), runID,
 	)
@@ -204,7 +218,9 @@ func (d *DB) CompleteRun(runID string, result *RunResult) error {
 // GetByThread looks up a run by its Slack thread timestamp.
 // Returns nil if not found.
 func (d *DB) GetByThread(threadTS string) (*Run, error) {
-	row := d.db.QueryRow(
+	ctx, cancel := dbCtx()
+	defer cancel()
+	row := d.db.QueryRowContext(ctx,
 		"SELECT id, status, slack_channel, slack_thread, branch, worktree_path, task, repo_name, started_at, result_json FROM runs WHERE slack_thread = ? AND status NOT IN ('done', 'failed') LIMIT 1",
 		threadTS,
 	)
@@ -213,7 +229,9 @@ func (d *DB) GetByThread(threadTS string) (*Run, error) {
 
 // ActiveRuns returns all runs in active states.
 func (d *DB) ActiveRuns() ([]*Run, error) {
-	rows, err := d.db.Query(
+	ctx, cancel := dbCtx()
+	defer cancel()
+	rows, err := d.db.QueryContext(ctx,
 		"SELECT id, status, slack_channel, slack_thread, branch, worktree_path, task, repo_name, started_at, result_json FROM runs WHERE status NOT IN ('done', 'failed') ORDER BY started_at",
 	)
 	if err != nil {
@@ -356,7 +374,9 @@ type Stats struct {
 
 // Stats returns aggregate metrics for completed runs and thread memory count.
 func (d *DB) Stats() (*Stats, error) {
-	rows, err := d.db.Query(
+	ctx, cancel := dbCtx()
+	defer cancel()
+	rows, err := d.db.QueryContext(ctx,
 		"SELECT status, result_json FROM runs WHERE status IN ('done', 'failed')",
 	)
 	if err != nil {
@@ -394,7 +414,7 @@ func (d *DB) Stats() (*Stats, error) {
 		s.AvgDuration = totalDuration / time.Duration(s.TotalRuns)
 	}
 
-	if err := d.db.QueryRow("SELECT COUNT(*) FROM thread_memory").Scan(&s.ThreadCount); err != nil {
+	if err := d.db.QueryRowContext(ctx, "SELECT COUNT(*) FROM thread_memory").Scan(&s.ThreadCount); err != nil {
 		return nil, fmt.Errorf("counting threads: %w", err)
 	}
 
@@ -419,7 +439,9 @@ type DigestOpportunity struct {
 
 // SaveDigestOpportunity persists a digest opportunity to the database.
 func (d *DB) SaveDigestOpportunity(opp *DigestOpportunity) error {
-	_, err := d.db.Exec(`
+	ctx, cancel := dbCtx()
+	defer cancel()
+	_, err := d.db.ExecContext(ctx, `
 		INSERT INTO digest_opportunities (summary, category, confidence, est_size, channel, message, keywords, dry_run, dismissed, reasoning, created_at)
 		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		opp.Summary, opp.Category, opp.Confidence, opp.EstSize,
@@ -436,9 +458,12 @@ func (d *DB) SaveDigestOpportunity(opp *DigestOpportunity) error {
 func (d *DB) HasRecentOpportunity(summary string, keywords string, within time.Duration) (bool, error) {
 	cutoff := time.Now().Add(-within)
 
+	ctx, cancel := dbCtx()
+	defer cancel()
+
 	// Fast path: exact summary match
 	var count int
-	err := d.db.QueryRow(
+	err := d.db.QueryRowContext(ctx,
 		"SELECT COUNT(*) FROM digest_opportunities WHERE summary = ? AND created_at > ?",
 		summary, cutoff,
 	).Scan(&count)
@@ -454,7 +479,7 @@ func (d *DB) HasRecentOpportunity(summary string, keywords string, within time.D
 		return false, nil
 	}
 
-	rows, err := d.db.Query(
+	rows, err := d.db.QueryContext(ctx,
 		"SELECT keywords FROM digest_opportunities WHERE created_at > ? AND keywords != ''",
 		cutoff,
 	)

@@ -32,11 +32,12 @@ type RunResult struct {
 
 // Manager tracks tadpole runs and maps Slack threads to runs.
 type Manager struct {
-	mu      sync.RWMutex
-	db      *DB // nil for in-memory only (tests, CLI)
-	runs    map[string]*Run
-	threads map[string]string // slackThreadTS → runID
-	history []*Run
+	mu          sync.RWMutex
+	db          *DB // nil for in-memory only (tests, CLI)
+	runs        map[string]*Run
+	threads     map[string]string // slackThreadTS → runID
+	history     []*Run
+	historySize int
 }
 
 // NewManager creates an in-memory-only manager (for tests and CLI).
@@ -49,11 +50,16 @@ func NewManager() *Manager {
 
 // NewPersistentManager creates a manager backed by SQLite.
 // It hydrates in-memory state from the database on creation.
-func NewPersistentManager(db *DB) (*Manager, error) {
+// historySize controls how many completed runs to keep (0 = use default of 50).
+func NewPersistentManager(db *DB, historySize int) (*Manager, error) {
+	if historySize <= 0 {
+		historySize = 50
+	}
 	m := &Manager{
-		db:      db,
-		runs:    make(map[string]*Run),
-		threads: make(map[string]string),
+		db:          db,
+		runs:        make(map[string]*Run),
+		threads:     make(map[string]string),
+		historySize: historySize,
 	}
 
 	// Hydrate active runs from DB
@@ -69,7 +75,7 @@ func NewPersistentManager(db *DB) (*Manager, error) {
 	}
 
 	// Hydrate history from DB
-	history, err := db.History(50)
+	history, err := db.History(historySize)
 	if err != nil {
 		return nil, err
 	}
@@ -158,9 +164,12 @@ func (m *Manager) Complete(runID string, result *RunResult) {
 	run.Result = result
 	delete(m.runs, runID)
 	m.history = append(m.history, run)
-	// Keep last 50
-	if len(m.history) > 50 {
-		m.history = m.history[len(m.history)-50:]
+	cap := m.historySize
+	if cap <= 0 {
+		cap = 50
+	}
+	if len(m.history) > cap {
+		m.history = m.history[len(m.history)-cap:]
 	}
 	if m.db != nil {
 		if err := m.db.CompleteRun(runID, result); err != nil {

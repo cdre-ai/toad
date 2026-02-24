@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"log/slog"
 	"os/exec"
+	"regexp"
 	"strings"
 	"time"
 
@@ -86,14 +87,11 @@ func (r *Runner) Execute(ctx context.Context, task Task) error {
 	// Post initial status message
 	statusTS := r.postStatus(task, ":hatching_chick: Tadpole spawned — working on: "+task.Summary)
 
-	var totalCost float64
-
 	fail := func(reason string) error {
 		r.stateManager.Complete(runID, &state.RunResult{
 			Success:  false,
 			Error:    reason,
 			Duration: time.Since(start),
-			Cost:     totalCost,
 		})
 		r.updateStatus(task, statusTS, ":x: Tadpole failed — "+reason)
 		r.swapReact(task, "hatching_chick", "x")
@@ -140,8 +138,7 @@ func (r *Runner) Execute(ctx context.Context, task Task) error {
 	if err != nil {
 		return fail(fmt.Sprintf("claude: %s", err))
 	}
-	totalCost += claudeOut.CostUSD
-	slog.Info("claude completed", "duration", claudeOut.Duration, "cost", claudeOut.CostUSD)
+	slog.Info("claude completed", "duration", claudeOut.Duration)
 
 	// 3. Validate + retry loop
 	r.updateStatus(task, statusTS, ":mag: Validating changes...")
@@ -168,7 +165,7 @@ func (r *Runner) Execute(ctx context.Context, task Task) error {
 			fmt.Sprintf(":recycle: Retry %d/%d — %s", attempt+1, r.cfg.Limits.MaxRetries, valResult.FailReason))
 
 		retryPrompt := buildRetryPrompt(valResult)
-		retryOut, err := RunClaude(ctx, ClaudeRunOpts{
+		_, err := RunClaude(ctx, ClaudeRunOpts{
 			WorktreePath:       wt.Path,
 			Prompt:             retryPrompt,
 			Model:              r.cfg.Claude.Model,
@@ -179,8 +176,6 @@ func (r *Runner) Execute(ctx context.Context, task Task) error {
 		if err != nil {
 			return fail(fmt.Sprintf("retry claude: %s", err))
 		}
-		totalCost += retryOut.CostUSD
-
 		valResult, err = Validate(ctx, wt.Path, valCfg)
 		if err != nil {
 			return fail(fmt.Sprintf("retry validation error: %s", err))
@@ -230,7 +225,6 @@ func (r *Runner) Execute(ctx context.Context, task Task) error {
 		PRUrl:        prURL,
 		FilesChanged: valResult.FilesChanged,
 		Duration:     duration,
-		Cost:         totalCost,
 	})
 
 	finalMsg := fmt.Sprintf(":white_check_mark: Done! PR: %s\n_(%d files changed, %s)_",
@@ -244,7 +238,7 @@ func (r *Runner) Execute(ctx context.Context, task Task) error {
 	}
 
 	slog.Info("tadpole completed",
-		"pr", prURL, "files", valResult.FilesChanged, "cost", totalCost, "duration", duration)
+		"pr", prURL, "files", valResult.FilesChanged, "duration", duration)
 
 	return nil
 }
@@ -321,10 +315,7 @@ func ship(ctx context.Context, worktreePath, branch string, task Task, autoMerge
 		issueLine = fmt.Sprintf("%s: %s\n\n", capitalize(task.IssueRef.Provider), task.IssueRef.ID)
 	}
 
-	slackContext := task.Description
-	if len(slackContext) > 2000 {
-		slackContext = slackContext[:2000] + "\n\n_(truncated)_"
-	}
+	slackContext := sanitizeForPR(task.Description, 2000)
 
 	body := fmt.Sprintf("## Summary\n\n%s\n\n%s%s_Category: %s | Size: %s_\n\n<details>\n<summary>Slack context</summary>\n\n%s\n\n</details>\n\n---\n:frog: Created by toad tadpole",
 		task.Summary, issueLine, slackLine, task.Category, task.EstSize, slackContext)
@@ -392,6 +383,32 @@ func capitalize(s string) string {
 		return s
 	}
 	return strings.ToUpper(s[:1]) + s[1:]
+}
+
+// secretPatterns matches common token/key formats that should not appear in PR bodies.
+var secretPatterns = regexp.MustCompile(
+	`(?i)` +
+		`xoxb-[A-Za-z0-9-]+` + `|` + // Slack bot token
+		`xapp-[A-Za-z0-9-]+` + `|` + // Slack app token
+		`xoxp-[A-Za-z0-9-]+` + `|` + // Slack user token
+		`sk-[A-Za-z0-9]{20,}` + `|` + // OpenAI/Anthropic key
+		`ghp_[A-Za-z0-9]{36,}` + `|` + // GitHub PAT
+		`gho_[A-Za-z0-9]{36,}` + `|` + // GitHub OAuth
+		`glpat-[A-Za-z0-9_-]{20,}` + `|` + // GitLab PAT
+		`AKIA[A-Z0-9]{16}` + `|` + // AWS access key
+		`Bearer\s+[A-Za-z0-9._-]{20,}` + `|` + // Bearer token
+		`token=[A-Za-z0-9._-]{20,}` + `|` + // token= param
+		`lin_api_[A-Za-z0-9]+`, // Linear API key
+)
+
+// sanitizeForPR redacts secrets and truncates text for safe embedding in a PR body.
+func sanitizeForPR(text string, maxLen int) string {
+	text = secretPatterns.ReplaceAllString(text, "[REDACTED]")
+	runes := []rune(text)
+	if len(runes) > maxLen {
+		text = string(runes[:maxLen]) + "\n\n_(truncated)_"
+	}
+	return text
 }
 
 func buildTadpolePrompt(task Task, maxFiles int, allRepoPaths []string) string {

@@ -123,7 +123,7 @@ toad run --repo frontend "Fix the login bug"  # multi-repo: specify which repo
 toad status
 ```
 
-Opens a live web dashboard in your browser showing daemon status, active runs, history, costs, triage breakdown, digest stats, PR watches, and config. Refreshes every 2 seconds.
+Opens a live web dashboard in your browser showing daemon status, active runs, history, triage breakdown, Toad King stats, PR watches, and config. Refreshes every 2 seconds.
 
 Use `--port 8080` to pin to a specific port.
 
@@ -166,7 +166,6 @@ limits:
   max_turns: 30           # Claude conversation turns per run
   timeout_minutes: 10
   max_files_changed: 5    # fail if more files changed
-  max_budget_usd: 1.00    # per-run cost cap
   max_retries: 1
 
 triage:

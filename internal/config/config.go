@@ -54,14 +54,14 @@ type ServiceConfig struct {
 }
 
 type LimitsConfig struct {
-	MaxConcurrent   int     `yaml:"max_concurrent"`
-	MaxTurns        int     `yaml:"max_turns"`
-	TimeoutMinutes  int     `yaml:"timeout_minutes"`
-	MaxFilesChanged int     `yaml:"max_files_changed"`
-	MaxBudgetUSD    float64 `yaml:"max_budget_usd"`
-	MaxRetries      int     `yaml:"max_retries"`
-	MaxReviewRounds int     `yaml:"max_review_rounds"`
-	MaxCIFixRounds  int     `yaml:"max_ci_fix_rounds"`
+	MaxConcurrent   int `yaml:"max_concurrent"`
+	MaxTurns        int `yaml:"max_turns"`
+	TimeoutMinutes  int `yaml:"timeout_minutes"`
+	MaxFilesChanged int `yaml:"max_files_changed"`
+	MaxRetries      int `yaml:"max_retries"`
+	MaxReviewRounds int `yaml:"max_review_rounds"`
+	MaxCIFixRounds  int `yaml:"max_ci_fix_rounds"`
+	HistorySize     int `yaml:"history_size"`
 }
 
 type TriageConfig struct {
@@ -116,10 +116,10 @@ func defaults() *Config {
 			MaxTurns:        30,
 			TimeoutMinutes:  10,
 			MaxFilesChanged: 5,
-			MaxBudgetUSD:    1.0,
 			MaxRetries:      1,
 			MaxReviewRounds: 3,
 			MaxCIFixRounds:  2,
+			HistorySize:     50,
 		},
 		Triage: TriageConfig{
 			Model:     "haiku",

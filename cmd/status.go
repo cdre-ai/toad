@@ -121,7 +121,6 @@ type apiRun struct {
 	Task         string  `json:"task"`
 	RepoName     string  `json:"repo_name,omitempty"`
 	StartedAt    int64   `json:"started_at"`
-	Cost         float64 `json:"cost,omitempty"`
 	Duration     float64 `json:"duration_s,omitempty"`
 	FilesChanged int     `json:"files_changed,omitempty"`
 	PRUrl        string  `json:"pr_url,omitempty"`
@@ -143,10 +142,10 @@ type apiConfigRepo struct {
 type apiConfig struct {
 	Repos          []apiConfigRepo `json:"repos"`
 	MaxConcurrent  int             `json:"max_concurrent"`
-	MaxBudget      float64         `json:"max_budget_usd"`
 	MaxRetries     int             `json:"max_retries"`
 	TimeoutMinutes int             `json:"timeout_minutes"`
 	DigestEnabled  bool            `json:"digest_enabled"`
+	DigestDryRun   bool            `json:"digest_dry_run"`
 	DigestInterval int             `json:"digest_interval_min,omitempty"`
 	DigestMaxSpawn int             `json:"digest_max_spawn_hour,omitempty"`
 }
@@ -316,7 +315,6 @@ func apiDataHandler(db *state.DB, cfg *config.Config) http.HandlerFunc {
 				StartedAt: r.StartedAt.Unix(),
 			}
 			if r.Result != nil {
-				hr.Cost = r.Result.Cost
 				hr.Duration = r.Result.Duration.Seconds()
 				hr.FilesChanged = r.Result.FilesChanged
 				hr.PRUrl = r.Result.PRUrl
@@ -351,10 +349,10 @@ func apiDataHandler(db *state.DB, cfg *config.Config) http.HandlerFunc {
 		if cfg != nil {
 			ac := &apiConfig{
 				MaxConcurrent:  cfg.Limits.MaxConcurrent,
-				MaxBudget:      cfg.Limits.MaxBudgetUSD,
 				MaxRetries:     cfg.Limits.MaxRetries,
 				TimeoutMinutes: cfg.Limits.TimeoutMinutes,
 				DigestEnabled:  cfg.Digest.Enabled,
+				DigestDryRun:   cfg.Digest.DryRun,
 			}
 			for _, r := range cfg.Repos {
 				ac.Repos = append(ac.Repos, apiConfigRepo{Name: r.Name, Path: r.Path})
@@ -765,9 +763,9 @@ const dashboardHTML = `<!DOCTYPE html>
 <div class="stats" id="stats-row">
   <div class="stat-card"><div class="label">Tadpole Runs</div><div class="value" id="s-total">-</div><div class="sub" id="s-breakdown"></div></div>
   <div class="stat-card"><div class="label">Success Rate</div><div class="value" id="s-rate">-</div><div class="sub" id="s-rate-sub"></div></div>
-  <div class="stat-card"><div class="label">Total Cost</div><div class="value" id="s-cost">-</div><div class="sub" id="s-cost-sub"></div></div>
   <div class="stat-card"><div class="label">Avg Duration</div><div class="value" id="s-dur">-</div><div class="sub">&nbsp;</div></div>
   <div class="stat-card"><div class="label">Ribbits</div><div class="value" id="s-ribbits">-</div><div class="sub" id="s-ribbits-sub"></div></div>
+  <div class="stat-card"><div class="label">Toad King</div><div class="value" id="s-king">-</div><div class="sub" id="s-king-sub">&nbsp;</div></div>
   <div class="stat-card"><div class="label">CC Usage</div><div class="value" id="s-cc">-</div><div class="sub" id="s-cc-sub">&nbsp;</div></div>
 </div>
 
@@ -803,6 +801,7 @@ const dashboardHTML = `<!DOCTYPE html>
       <div class="info-row"><span class="lbl">Next flush</span><span class="val" id="d-next">-</span></div>
       <div class="info-row"><span class="lbl">Messages processed</span><span class="val" id="d-processed">-</span></div>
       <div class="info-row"><span class="lbl">Opportunities found</span><span class="val" id="d-opps">-</span></div>
+      <div class="info-row"><span class="lbl">Approved / Dismissed</span><span class="val" id="d-approved">-</span></div>
       <div class="info-row"><span class="lbl">Auto-spawns</span><span class="val" id="d-spawns">-</span></div>
     </div>
   </section>
@@ -865,7 +864,7 @@ function fmtUptime(seconds) {
   if (h > 0) return h + 'h ' + m + 'm';
   return m + 'm';
 }
-function fmtCost(c) { return c ? '$' + c.toFixed(2) : '-'; }
+function fmtCost(c) { return c ? '$' + c.toFixed(2) : '-'; } // kept for CC usage display
 function fmtRate(total, succeeded) {
   if (!total) return '-';
   return (succeeded / total * 100).toFixed(1) + '%';
@@ -960,13 +959,22 @@ async function refresh() {
       st.TotalRuns > 0 && (st.Succeeded / st.TotalRuns) >= 0.8 ? 'var(--green)' : 'var(--amber)';
     document.getElementById('s-rate-sub').textContent =
       st.Succeeded + '/' + st.TotalRuns + ' succeeded';
-    document.getElementById('s-cost').textContent = fmtCost(st.TotalCost);
-    document.getElementById('s-cost-sub').textContent =
-      st.TotalRuns > 0 ? fmtCost(st.TotalCost / st.TotalRuns) + '/run avg' : '';
     document.getElementById('s-dur').textContent = fmtDuration(st.AvgDuration / 1e9);
     document.getElementById('s-ribbits').textContent = num(dm.ribbits || 0);
     document.getElementById('s-ribbits-sub').textContent =
       st.ThreadCount ? st.ThreadCount + ' thread memories' : 'this session';
+
+    // Toad King stat card
+    if (dm.digest_enabled) {
+      document.getElementById('s-king').textContent = num(dm.digest_opportunities || 0);
+      document.getElementById('s-king').style.color = 'var(--green)';
+      document.getElementById('s-king-sub').textContent =
+        dm.digest_dry_run ? 'opportunities (dry-run)' : dm.digest_spawns + ' spawned';
+    } else {
+      document.getElementById('s-king').textContent = 'Off';
+      document.getElementById('s-king').style.color = 'var(--dim)';
+      document.getElementById('s-king-sub').innerHTML = '&nbsp;';
+    }
 
     // CC Usage card
     const cc = d.cc_usage;
@@ -1011,7 +1019,7 @@ async function refresh() {
     if (history.length === 0) {
       document.getElementById('history-wrap').innerHTML = '<div class="empty">No completed runs</div>';
     } else {
-      let html = '<table><tr><th style="width:90px">Status</th><th style="width:22%">Branch</th><th>Task</th><th style="width:60px">Files</th><th style="width:65px">Cost</th><th style="width:80px">Duration</th><th style="width:22%">PR</th></tr>';
+      let html = '<table><tr><th style="width:90px">Status</th><th style="width:22%">Branch</th><th>Task</th><th style="width:60px">Files</th><th style="width:80px">Duration</th><th style="width:22%">PR</th></tr>';
       for (let i = 0; i < history.length; i++) {
         const r = history[i];
         const hidden = !historyExpanded && i >= MAX_VISIBLE ? ' style="display:none"' : '';
@@ -1022,7 +1030,6 @@ async function refresh() {
           + '<td class="mono">' + esc(r.branch) + '</td>'
           + '<td>' + esc(r.task) + '</td>'
           + '<td class="mono">' + (r.files_changed || '-') + '</td>'
-          + '<td class="mono">' + fmtCost(r.cost) + '</td>'
           + '<td class="mono">' + fmtDuration(r.duration_s) + '</td>'
           + '<td>' + pr + '</td></tr>';
       }
@@ -1047,6 +1054,10 @@ async function refresh() {
 
     // Digest panel
     const dsec = document.getElementById('digest-section');
+    const opps = d.opportunities || [];
+    const approvedCount = opps.filter(o => !o.dismissed && !o.dry_run).length;
+    const dismissedCount = opps.filter(o => o.dismissed).length;
+    const dryRunCount = opps.filter(o => o.dry_run && !o.dismissed).length;
     if (dm.running) {
       dsec.style.display = '';
       if (dm.digest_enabled) {
@@ -1060,6 +1071,9 @@ async function refresh() {
           dm.digest_next_flush ? 'in ' + relTime(dm.digest_next_flush, now) : '-';
         document.getElementById('d-processed').textContent = num(dm.digest_processed);
         document.getElementById('d-opps').textContent = num(dm.digest_opportunities);
+        let approvedText = '<span style="color:var(--green)">' + approvedCount + '</span> / <span style="color:var(--red)">' + dismissedCount + '</span>';
+        if (dryRunCount > 0) approvedText += ' <span style="color:var(--dim)">(' + dryRunCount + ' dry-run)</span>';
+        document.getElementById('d-approved').innerHTML = approvedText;
         document.getElementById('d-spawns').textContent = num(dm.digest_spawns);
       } else {
         document.getElementById('d-status').innerHTML = '<span style="color:var(--dim)">Disabled</span>';
@@ -1067,12 +1081,13 @@ async function refresh() {
         document.getElementById('d-next').textContent = '-';
         document.getElementById('d-processed').textContent = '-';
         document.getElementById('d-opps').textContent = '-';
+        document.getElementById('d-approved').textContent = '-';
         document.getElementById('d-spawns').textContent = '-';
       }
     } else {
       dsec.style.display = '';
       document.getElementById('d-status').innerHTML = '<span style="color:var(--dim)">Daemon offline</span>';
-      ['d-buffer','d-next','d-processed','d-opps','d-spawns'].forEach(id => {
+      ['d-buffer','d-next','d-processed','d-opps','d-approved','d-spawns'].forEach(id => {
         document.getElementById(id).textContent = '-';
       });
     }
@@ -1082,44 +1097,52 @@ async function refresh() {
     tsec.style.display = (dm.running || (dm.triages || 0) > 0) ? '' : 'none';
 
     // Digest Opportunities (limited)
-    const opps = d.opportunities || [];
+    const digestEnabled = (d.config && d.config.digest_enabled) || (dm.running && dm.digest_enabled);
     const oppsSec = document.getElementById('opportunities-section');
-    if (opps.length === 0) {
+    if (opps.length === 0 && !digestEnabled) {
       oppsSec.style.display = 'none';
     } else {
       oppsSec.style.display = '';
       document.getElementById('opps-count').textContent = opps.length;
-      let ohtml = '<table><tr><th style="width:80px">When</th><th>Summary</th><th style="width:70px">Category</th><th style="width:80px">Confidence</th><th style="width:60px">Size</th><th style="width:80px">Status</th></tr>';
-      for (let i = 0; i < opps.length; i++) {
-        const o = opps[i];
-        const hidden = !oppsExpanded && i >= MAX_VISIBLE ? ' display:none;' : '';
-        let obadge;
-        if (o.dismissed) {
-          obadge = '<span class="badge badge-failed">dismissed</span>';
-        } else if (o.dry_run) {
-          obadge = '<span class="badge badge-validating">dry-run</span>';
-        } else {
-          obadge = '<span class="badge badge-done">spawned</span>';
+      let ohtml = '';
+      if (opps.length === 0) {
+        const dryRunMode = (d.config && d.config.digest_dry_run) || (dm.running && dm.digest_dry_run);
+        const modeLabel = dryRunMode ? 'dry-run' : 'live';
+        ohtml = '<div class="empty">Toad King is monitoring your channels (' + modeLabel + ' mode). Opportunities will appear here as they are identified.</div>';
+        document.getElementById('opps-wrap').innerHTML = ohtml;
+      } else {
+        ohtml = '<table><tr><th style="width:80px">When</th><th>Summary</th><th style="width:70px">Category</th><th style="width:80px">Confidence</th><th style="width:60px">Size</th><th style="width:80px">Status</th></tr>';
+        for (let i = 0; i < opps.length; i++) {
+          const o = opps[i];
+          const hidden = !oppsExpanded && i >= MAX_VISIBLE ? ' display:none;' : '';
+          let obadge;
+          if (o.dismissed) {
+            obadge = '<span class="badge badge-failed">dismissed</span>';
+          } else if (o.dry_run) {
+            obadge = '<span class="badge badge-validating">dry-run</span>';
+          } else {
+            obadge = '<span class="badge badge-done">spawned</span>';
+          }
+          const dimStyle = o.dismissed ? 'opacity:0.55;' : '';
+          const rowStyle = (hidden || dimStyle) ? ' style="' + hidden + dimStyle + '"' : '';
+          const reasonTip = o.reasoning ? '<br><span style="color:var(--dim);font-size:11px">' + esc(o.reasoning).substring(0, 120) + '</span>' : '';
+          ohtml += '<tr' + rowStyle + '><td>' + relTimeAgo(o.created_at, now) + '</td>'
+            + '<td style="white-space:normal">' + esc(o.summary) + reasonTip + '</td>'
+            + '<td>' + esc(o.category) + '</td>'
+            + '<td class="mono">' + (o.confidence * 100).toFixed(0) + '%</td>'
+            + '<td>' + esc(o.est_size) + '</td>'
+            + '<td>' + obadge + '</td></tr>';
         }
-        const dimStyle = o.dismissed ? 'opacity:0.55;' : '';
-        const rowStyle = (hidden || dimStyle) ? ' style="' + hidden + dimStyle + '"' : '';
-        const reasonTip = o.reasoning ? '<br><span style="color:var(--dim);font-size:11px">' + esc(o.reasoning).substring(0, 120) + '</span>' : '';
-        ohtml += '<tr' + rowStyle + '><td>' + relTimeAgo(o.created_at, now) + '</td>'
-          + '<td style="white-space:normal">' + esc(o.summary) + reasonTip + '</td>'
-          + '<td>' + esc(o.category) + '</td>'
-          + '<td class="mono">' + (o.confidence * 100).toFixed(0) + '%</td>'
-          + '<td>' + esc(o.est_size) + '</td>'
-          + '<td>' + obadge + '</td></tr>';
-      }
-      ohtml += '</table>';
-      if (opps.length > MAX_VISIBLE) {
-        if (oppsExpanded) {
-          ohtml += '<div class="toggle-row" onclick="toggleOpps()">Show less</div>';
-        } else {
-          ohtml += '<div class="toggle-row" onclick="toggleOpps()">Show all (' + opps.length + ')</div>';
+        ohtml += '</table>';
+        if (opps.length > MAX_VISIBLE) {
+          if (oppsExpanded) {
+            ohtml += '<div class="toggle-row" onclick="toggleOpps()">Show less</div>';
+          } else {
+            ohtml += '<div class="toggle-row" onclick="toggleOpps()">Show all (' + opps.length + ')</div>';
+          }
         }
+        document.getElementById('opps-wrap').innerHTML = ohtml;
       }
-      document.getElementById('opps-wrap').innerHTML = ohtml;
     }
 
     // PR Watches
@@ -1153,7 +1176,6 @@ async function refresh() {
         }
       }
       html += '<div class="info-row"><span class="lbl">Max concurrent</span><span class="val">' + cfg.max_concurrent + '</span></div>';
-      html += '<div class="info-row"><span class="lbl">Max budget</span><span class="val">' + fmtCost(cfg.max_budget_usd) + '/run</span></div>';
       html += '<div class="info-row"><span class="lbl">Max retries</span><span class="val">' + cfg.max_retries + '</span></div>';
       html += '<div class="info-row"><span class="lbl">Timeout</span><span class="val">' + cfg.timeout_minutes + 'm</span></div>';
       if (cfg.digest_enabled) {

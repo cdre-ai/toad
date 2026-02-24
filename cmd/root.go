@@ -106,7 +106,7 @@ func runDaemon(cmd *cobra.Command, args []string) error {
 		slog.Warn("startup recovery failed", "error", err)
 	}
 
-	stateManager, err := state.NewPersistentManager(stateDB)
+	stateManager, err := state.NewPersistentManager(stateDB, cfg.Limits.HistorySize)
 	if err != nil {
 		return fmt.Errorf("hydrating state: %w", err)
 	}
@@ -382,20 +382,28 @@ func handleTriggered(
 	// Acknowledge
 	slackClient.React(msg.Channel, msg.Timestamp, "eyes")
 
-	// Gather conversation context
+	// Gather conversation context (retry once on failure)
 	if msg.ThreadTimestamp != "" {
-		// In a thread: fetch all thread messages
 		threadMsgs, err := slackClient.FetchThreadMessages(msg.Channel, msg.ThreadTimestamp)
 		if err != nil {
-			slog.Warn("failed to fetch thread context", "error", err)
+			slog.Warn("failed to fetch thread context, retrying", "error", err)
+			time.Sleep(1 * time.Second)
+			threadMsgs, err = slackClient.FetchThreadMessages(msg.Channel, msg.ThreadTimestamp)
+		}
+		if err != nil {
+			slog.Warn("failed to fetch thread context after retry", "error", err)
 		} else {
 			msg.ThreadContext = threadMsgs
 		}
 	} else {
-		// Top-level mention: fetch recent channel messages for context
 		recentMsgs, err := slackClient.FetchRecentMessages(msg.Channel, msg.Timestamp, 10)
 		if err != nil {
-			slog.Warn("failed to fetch channel context", "error", err)
+			slog.Warn("failed to fetch channel context, retrying", "error", err)
+			time.Sleep(1 * time.Second)
+			recentMsgs, err = slackClient.FetchRecentMessages(msg.Channel, msg.Timestamp, 10)
+		}
+		if err != nil {
+			slog.Warn("failed to fetch channel context after retry", "error", err)
 		} else if len(recentMsgs) > 0 {
 			msg.ThreadContext = recentMsgs
 		}

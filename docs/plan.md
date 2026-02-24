@@ -191,7 +191,7 @@ Inspired by [Stripe Minions](https://stripe.dev/blog/minions-stripes-one-shot-en
 
 ## Phase 3.5: Robustness & Bug Fixes
 
-**Status: Planned**
+**Status: In progress**
 
 Quick wins from the Feb 2026 full review. All are targeted, small changes.
 
@@ -226,7 +226,7 @@ Quick wins from the Feb 2026 full review. All are targeted, small changes.
     }
     ```
 
-- [ ] Add `QueryContext` with timeouts to critical DB paths
+- [x] Add `QueryContext` with timeouts to critical DB paths
   - **File:** `internal/state/db.go`
   - **Problem:** All DB methods use `db.Query`/`db.Exec` without context. If SQLite is blocked (WAL contention, disk I/O stall), the calling goroutine blocks indefinitely, which can freeze the event loop.
   - **Fix:** Add a helper and use it in the hot-path methods:
@@ -240,7 +240,7 @@ Quick wins from the Feb 2026 full review. All are targeted, small changes.
 
 ### Sprint 2: Robustness
 
-- [ ] Retry on thread context fetch failure
+- [x] Retry on thread context fetch failure
   - **File:** `cmd/root.go` — `handleTriggered()` lines 357-373, `handleTadpoleRequest()` lines 569-576
   - **Problem:** When `FetchThreadMessages` fails (network blip, Slack API timeout), toad logs a warning but proceeds with empty `ThreadContext`. Tadpoles get spawned with just "@toad fix!" — Claude has no idea what to fix.
   - **Fix:** Add a single retry with 2s backoff in both locations. Pattern:
@@ -262,7 +262,7 @@ Quick wins from the Feb 2026 full review. All are targeted, small changes.
     ```
   - For `handleTriggered`: same retry, but still proceed (questions can work with just the trigger text).
 
-- [ ] Sanitize Slack context in PR bodies
+- [x] Sanitize Slack context in PR bodies
   - **File:** `internal/tadpole/runner.go` — `ship()` function, line 310
   - **Problem:** `task.Description` (raw Slack thread text) is embedded verbatim in the PR body inside a `<details>` block. Can leak API keys, tokens, internal URLs, PII that appeared in error messages or Sentry alerts.
   - **Fix:** Add a `sanitizeForPR(text string, maxLen int) string` function:
@@ -291,7 +291,7 @@ Quick wins from the Feb 2026 full review. All are targeted, small changes.
        ```
     3. Thread the config value through `reviewer.NewWatcher` → `poll()` → `OpenPRWatches()`
 
-- [ ] Make history cap configurable
+- [x] Make history cap configurable
   - **Files:** `internal/config/config.go`, `internal/state/state.go`
   - **Problem:** `state.go:161` hardcodes `if len(m.history) > 50`. High-throughput teams want to see more history in the dashboard.
   - **Fix:**
@@ -346,21 +346,21 @@ Quick wins from the Feb 2026 full review. All are targeted, small changes.
 
 ## Phase 4: Toad King as Default Experience
 
-**Status: Planned**
+**Status: In progress**
 
 The competitive landscape has shifted (Feb 2026). Copilot Coding Agent is GA, Devin supports Slack triggers, Builder.io has Slack+Jira triggers. "Slack bot that creates PRs" is becoming table stakes. Toad King (proactive passive monitoring) remains unique — **lean into it as the headline feature**.
 
 ### Sprint 1: Make Toad King visible from day one
 
-- [ ] Enable digest in dry-run mode by default — change `toad init` to write `digest.enabled: true` and `digest.dry_run: true` in generated config. New users immediately see Toad King identifying opportunities in the dashboard without any spawns.
-- [ ] Add Toad King onboarding to init wizard — after token setup, explain what Toad King does and ask if they want to enable live mode (dry-run is on by default).
-- [ ] Dashboard: add Toad King section with investigation results — show opportunities found, approved vs dismissed, feasibility reasoning. Make the value visible even in dry-run.
+- [x] Enable digest in dry-run mode by default — change `toad init` to write `digest.enabled: true` and `digest.dry_run: true` in generated config. New users immediately see Toad King identifying opportunities in the dashboard without any spawns.
+- [x] Add Toad King onboarding to init wizard — after token setup, explain what Toad King does and ask if they want to enable live mode (dry-run is on by default).
+- [x] Dashboard: add Toad King section with investigation results — show opportunities found, approved vs dismissed, feasibility reasoning. Make the value visible even in dry-run.
 
 ### Sprint 2: Adoption metrics
 
 - [ ] Track merge rate — add `merged` boolean to `runs` table. Poll `gh pr view --json state` periodically (piggyback on reviewer poll). Dashboard shows: PRs created, PRs merged, merge rate.
 - [ ] Track review round effectiveness — how often does a review fix round result in approval? Store per-round outcomes.
-- [ ] Dashboard: ROI summary — "Toad has shipped X PRs, Y were merged (Z% merge rate), saving ~N hours of developer time."
+- [ ] Dashboard: ROI summary — "Toad has shipped X PRs, Y were merged (Z% merge rate)" with time-to-merge stats.
 
 ## Phase 5: Multi-repo, Code Owners & MCP
 
@@ -447,13 +447,13 @@ The competitive landscape has shifted (Feb 2026). Copilot Coding Agent is GA, De
 - [ ] PR titles with emoji/unicode characters render correctly (no byte truncation)
 - [x] Digest analyze does not use `--dangerously-skip-permissions`
 - [ ] DB migration errors are logged, not silently swallowed
-- [ ] Thread context failure retries or warns user before spawning with empty context
+- [x] Thread context failure retries or warns user before spawning with empty context
 - [ ] Reviewer fix round limit is configurable via `limits.max_review_rounds`
 - [ ] `internal/reviewer/` has unit tests covering comment filtering and fix task construction
 - [ ] Digest investigation gate has tests covering feasible/not-feasible/error paths
 
 ### Phase 4
 
-- [ ] `toad init` enables digest in dry-run mode by default
-- [ ] Dashboard shows Toad King investigation results (approved/dismissed with reasoning)
+- [x] `toad init` enables digest in dry-run mode by default
+- [x] Dashboard shows Toad King investigation results (approved/dismissed with reasoning)
 - [ ] Dashboard shows merge rate and ROI summary

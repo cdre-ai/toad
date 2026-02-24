@@ -330,7 +330,6 @@ limits:
   max_turns: 30
   timeout_minutes: 10
   max_files_changed: 5
-  max_budget_usd: 1.00
   max_retries: 1
 
 triage:
