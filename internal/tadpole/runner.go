@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/hergen/toad/internal/config"
+	"github.com/hergen/toad/internal/issuetracker"
 	islack "github.com/hergen/toad/internal/slack"
 	"github.com/hergen/toad/internal/state"
 	"github.com/hergen/toad/internal/triage"
@@ -25,6 +26,7 @@ type Task struct {
 	SlackChannel   string
 	SlackThreadTS  string
 	TriageResult   *triage.Result
+	IssueRef       *issuetracker.IssueRef
 	ExistingBranch string // if set, checkout this branch instead of creating new (review fixes)
 }
 
@@ -94,7 +96,7 @@ func (r *Runner) Execute(ctx context.Context, task Task) error {
 	if task.ExistingBranch != "" {
 		wt, err = CheckoutWorktree(ctx, r.cfg.Repo.Path, task.ExistingBranch)
 	} else {
-		wt, err = CreateWorktree(ctx, r.cfg.Repo.Path, task.Summary, r.cfg.Repo.DefaultBranch)
+		wt, err = CreateWorktree(ctx, r.cfg.Repo.Path, buildBranchSlug(task), r.cfg.Repo.DefaultBranch)
 	}
 	if err != nil {
 		return fail(fmt.Sprintf("worktree setup: %s", err))
@@ -298,8 +300,15 @@ func ship(ctx context.Context, worktreePath, branch string, task Task, autoMerge
 		slackLine = fmt.Sprintf("[View Slack thread](%s)\n\n", slackLink)
 	}
 
-	body := fmt.Sprintf("## Summary\n\n%s\n\n%s_Category: %s | Size: %s_\n\n<details>\n<summary>Slack context</summary>\n\n%s\n\n</details>\n\n---\n:frog: Created by toad tadpole",
-		task.Summary, slackLine, task.Category, task.EstSize, task.Description)
+	issueLine := ""
+	if task.IssueRef != nil && task.IssueRef.URL != "" {
+		issueLine = fmt.Sprintf("%s: [%s](%s)\n\n", capitalize(task.IssueRef.Provider), task.IssueRef.ID, task.IssueRef.URL)
+	} else if task.IssueRef != nil {
+		issueLine = fmt.Sprintf("%s: %s\n\n", capitalize(task.IssueRef.Provider), task.IssueRef.ID)
+	}
+
+	body := fmt.Sprintf("## Summary\n\n%s\n\n%s%s_Category: %s | Size: %s_\n\n<details>\n<summary>Slack context</summary>\n\n%s\n\n</details>\n\n---\n:frog: Created by toad tadpole",
+		task.Summary, issueLine, slackLine, task.Category, task.EstSize, task.Description)
 
 	slog.Info("creating PR", "title", title, "branch", branch)
 	prCmd := exec.CommandContext(ctx, "gh", "pr", "create",
@@ -334,6 +343,32 @@ func ship(ctx context.Context, worktreePath, branch string, task Task, autoMerge
 	}
 
 	return prURL, nil
+}
+
+// buildBranchSlug generates a branch slug for the worktree.
+// If the task has an issue ref, it returns a pre-slugified string like
+// "plf-3125-fix-nil-pointer". Otherwise it returns the raw summary and
+// lets CreateWorktree call Slugify (which handles truncation + cleanup).
+func buildBranchSlug(task Task) string {
+	if task.IssueRef != nil {
+		prefix := task.IssueRef.BranchPrefix()
+		summary := Slugify(task.Summary)
+		slug := prefix + "-" + summary
+		if len(slug) > 40 {
+			slug = slug[:40]
+			slug = strings.TrimRight(slug, "-")
+		}
+		return slug
+	}
+	return task.Summary
+}
+
+// capitalize returns s with the first letter uppercased. e.g. "linear" → "Linear".
+func capitalize(s string) string {
+	if s == "" {
+		return s
+	}
+	return strings.ToUpper(s[:1]) + s[1:]
 }
 
 func buildTadpolePrompt(task Task, maxFiles int) string {

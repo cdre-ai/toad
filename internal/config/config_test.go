@@ -100,3 +100,70 @@ func TestApplyEnv(t *testing.T) {
 		t.Errorf("expected bot_token from env, got %q", cfg.Slack.BotToken)
 	}
 }
+
+func TestApplyEnv_LinearToken(t *testing.T) {
+	cfg := defaults()
+
+	os.Setenv("TOAD_LINEAR_API_TOKEN", "lin_api_test123")
+	defer os.Unsetenv("TOAD_LINEAR_API_TOKEN")
+
+	applyEnv(cfg)
+
+	if cfg.IssueTracker.APIToken != "lin_api_test123" {
+		t.Errorf("expected linear API token from env, got %q", cfg.IssueTracker.APIToken)
+	}
+}
+
+func TestValidate_IssueTrackerCreateMissingToken(t *testing.T) {
+	cfg := defaults()
+	cfg.Slack.AppToken = "xapp-test"
+	cfg.Slack.BotToken = "xoxb-test"
+	cfg.IssueTracker.Enabled = true
+	cfg.IssueTracker.CreateIssues = true
+	cfg.IssueTracker.TeamID = "team-123"
+	// No API token
+	err := Validate(cfg)
+	if err == nil {
+		t.Error("expected error for missing api_token when create_issues enabled")
+	}
+}
+
+func TestValidate_IssueTrackerCreateMissingTeamID(t *testing.T) {
+	cfg := defaults()
+	cfg.Slack.AppToken = "xapp-test"
+	cfg.Slack.BotToken = "xoxb-test"
+	cfg.IssueTracker.Enabled = true
+	cfg.IssueTracker.CreateIssues = true
+	cfg.IssueTracker.APIToken = "lin_api_test"
+	// No team ID
+	err := Validate(cfg)
+	if err == nil {
+		t.Error("expected error for missing team_id when create_issues enabled")
+	}
+}
+
+func TestValidate_IssueTrackerDetectOnlyNoValidation(t *testing.T) {
+	cfg := defaults()
+	cfg.Slack.AppToken = "xapp-test"
+	cfg.Slack.BotToken = "xoxb-test"
+	cfg.IssueTracker.Enabled = true
+	cfg.IssueTracker.CreateIssues = false // detect-only, no token needed
+	err := Validate(cfg)
+	if err != nil {
+		t.Errorf("detect-only mode should not require token/team: %v", err)
+	}
+}
+
+func TestDefaults_IssueTracker(t *testing.T) {
+	cfg := defaults()
+
+	if cfg.IssueTracker.Enabled {
+		t.Error("issue tracker should be disabled by default")
+	}
+	if cfg.IssueTracker.Provider != "linear" {
+		t.Errorf("default provider should be 'linear', got %q", cfg.IssueTracker.Provider)
+	}
+	if cfg.IssueTracker.CreateIssues {
+		t.Error("create_issues should be false by default")
+	}
+}

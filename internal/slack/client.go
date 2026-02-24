@@ -335,7 +335,7 @@ func (c *Client) FetchMessage(channel, ts string) (*IncomingMessage, error) {
 	}
 	m := msgs[0]
 	return &IncomingMessage{
-		Text:            m.Text,
+		Text:            extractFullText(m.Msg),
 		Channel:         channel,
 		User:            m.User,
 		Timestamp:       m.Timestamp,

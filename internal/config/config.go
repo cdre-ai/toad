@@ -10,13 +10,14 @@ import (
 )
 
 type Config struct {
-	Slack  SlackConfig  `yaml:"slack"`
-	Repo   RepoConfig   `yaml:"repo"`
-	Limits LimitsConfig `yaml:"limits"`
-	Triage TriageConfig `yaml:"triage"`
-	Claude ClaudeConfig `yaml:"claude"`
-	Digest DigestConfig `yaml:"digest"`
-	Log    LogConfig    `yaml:"log"`
+	Slack        SlackConfig        `yaml:"slack"`
+	Repo         RepoConfig         `yaml:"repo"`
+	Limits       LimitsConfig       `yaml:"limits"`
+	Triage       TriageConfig       `yaml:"triage"`
+	Claude       ClaudeConfig       `yaml:"claude"`
+	Digest       DigestConfig       `yaml:"digest"`
+	IssueTracker IssueTrackerConfig `yaml:"issue_tracker"`
+	Log          LogConfig          `yaml:"log"`
 }
 
 type SlackConfig struct {
@@ -79,6 +80,16 @@ type DigestConfig struct {
 	ChunkTimeoutSecs  int      `yaml:"chunk_timeout_secs"`  // default: 60
 }
 
+type IssueTrackerConfig struct {
+	Enabled        bool   `yaml:"enabled"`
+	Provider       string `yaml:"provider"`
+	APIToken       string `yaml:"api_token"`
+	TeamID         string `yaml:"team_id"`
+	CreateIssues   bool   `yaml:"create_issues"`
+	BugLabelID     string `yaml:"bug_label_id"`
+	FeatureLabelID string `yaml:"feature_label_id"`
+}
+
 type LogConfig struct {
 	Level string `yaml:"level"`
 	File  string `yaml:"file"`
@@ -124,6 +135,10 @@ func defaults() *Config {
 			MaxChunkSize:      50,
 			ChunkTimeoutSecs:  60,
 		},
+		IssueTracker: IssueTrackerConfig{
+			Enabled:  false,
+			Provider: "linear",
+		},
 		Log: LogConfig{
 			Level: "info",
 			File:  filepath.Join(homeDir, ".toad", "toad.log"),
@@ -166,6 +181,9 @@ func applyEnv(cfg *Config) {
 	if v := os.Getenv("TOAD_SLACK_BOT_TOKEN"); v != "" {
 		cfg.Slack.BotToken = v
 	}
+	if v := os.Getenv("TOAD_LINEAR_API_TOKEN"); v != "" {
+		cfg.IssueTracker.APIToken = v
+	}
 }
 
 // Validate checks that required configuration is present.
@@ -181,6 +199,14 @@ func Validate(cfg *Config) error {
 	}
 	if _, err := os.Stat(cfg.Repo.Path); os.IsNotExist(err) {
 		return fmt.Errorf("repo path does not exist: %s", cfg.Repo.Path)
+	}
+	if cfg.IssueTracker.Enabled && cfg.IssueTracker.CreateIssues {
+		if cfg.IssueTracker.APIToken == "" {
+			return fmt.Errorf("issue_tracker.api_token is required when create_issues is enabled (set in config or TOAD_LINEAR_API_TOKEN env)")
+		}
+		if cfg.IssueTracker.TeamID == "" {
+			return fmt.Errorf("issue_tracker.team_id is required when create_issues is enabled")
+		}
 	}
 	return nil
 }

@@ -159,6 +159,13 @@ digest:
   allowed_categories: [bug]
   max_est_size: small
 
+issue_tracker:
+  enabled: false          # enable issue tracker integration
+  provider: linear        # only "linear" for now
+  # api_token: ""         # or TOAD_LINEAR_API_TOKEN env var
+  # team_id: ""           # Linear team ID for issue creation
+  create_issues: false    # create issues for opportunities without one
+
 log:
   level: info
   file: ~/.toad/toad.log
@@ -166,11 +173,12 @@ log:
 
 ### Environment variables
 
-Slack tokens can be set via environment instead of config:
+Tokens can be set via environment instead of config:
 
 ```bash
 export TOAD_SLACK_APP_TOKEN=xapp-...
 export TOAD_SLACK_BOT_TOKEN=xoxb-...
+export TOAD_LINEAR_API_TOKEN=lin_api_...  # optional, for Linear integration
 ```
 
 ## 💬 Interacting with toad
@@ -242,6 +250,7 @@ internal/
   state/           In-memory + SQLite state, crash recovery
   reviewer/        PR review comment watcher, fix tadpole spawning
   digest/          Toad King: batch analysis, auto-spawn with guardrails
+  issuetracker/    Generic issue tracker interface (Linear integration)
   update/          Version checking and self-update
   config/          YAML config with cascading defaults
   tui/             Shared theme for init wizard

@@ -93,8 +93,18 @@ func handleMessage(ctx context.Context, c *Client, ev *slackevents.MessageEvent)
 		slog.Debug("skipping: message subtype", "subtype", ev.SubType)
 		return
 	}
+
+	// Extract full text including blocks/attachments. The custom MessageEvent
+	// unmarshaler always populates ev.Message with a full slack.Msg, so we get
+	// rich content from bot messages (Sentry alerts, CI, etc.) instead of just
+	// the bare fallback text in ev.Text.
+	fullText := ev.Text
+	if ev.Message != nil {
+		fullText = extractFullText(*ev.Message)
+	}
+
 	// Skip @mentions — these are handled by handleAppMention
-	if c.botUserID != "" && strings.Contains(ev.Text, "<@"+c.botUserID+">") {
+	if c.botUserID != "" && strings.Contains(fullText, "<@"+c.botUserID+">") {
 		slog.Debug("skipping: mention handled by app_mention", "user", ev.User)
 		return
 	}
@@ -104,10 +114,10 @@ func handleMessage(ctx context.Context, c *Client, ev *slackevents.MessageEvent)
 	}
 
 	isBot := ev.BotID != ""
-	triggered := !isBot && hasKeywordTrigger(ev.Text, c.triggers.Keywords)
+	triggered := !isBot && hasKeywordTrigger(fullText, c.triggers.Keywords)
 
 	msg := &IncomingMessage{
-		Text:            ev.Text,
+		Text:            fullText,
 		Channel:         ev.Channel,
 		User:            ev.User,
 		Timestamp:       ev.TimeStamp,

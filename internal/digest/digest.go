@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/hergen/toad/internal/config"
+	"github.com/hergen/toad/internal/issuetracker"
 	"github.com/hergen/toad/internal/state"
 	"github.com/hergen/toad/internal/tadpole"
 )
@@ -81,6 +82,7 @@ type Engine struct {
 	investigate InvestigateFunc
 	react       ReactFunc
 	db          *state.DB
+	tracker     issuetracker.Tracker
 
 	mu     sync.Mutex
 	buffer []Message
@@ -98,7 +100,7 @@ type Engine struct {
 }
 
 // New creates a digest engine.
-func New(cfg *config.DigestConfig, triageModel string, spawn SpawnFunc, notify NotifyFunc, investigate InvestigateFunc, react ReactFunc, db *state.DB) *Engine {
+func New(cfg *config.DigestConfig, triageModel string, spawn SpawnFunc, notify NotifyFunc, investigate InvestigateFunc, react ReactFunc, db *state.DB, tracker issuetracker.Tracker) *Engine {
 	return &Engine{
 		cfg:         cfg,
 		model:       triageModel,
@@ -107,6 +109,7 @@ func New(cfg *config.DigestConfig, triageModel string, spawn SpawnFunc, notify N
 		investigate: investigate,
 		react:       react,
 		db:          db,
+		tracker:     tracker,
 	}
 }
 
@@ -317,6 +320,24 @@ func (e *Engine) processOpportunities(ctx context.Context, msgs []Message, oppor
 			threadTS = msg.Timestamp
 		}
 
+		// Detect or create issue tracker reference
+		var issueRef *issuetracker.IssueRef
+		if e.tracker != nil {
+			issueRef = e.tracker.ExtractIssueRef(msg.Text)
+			if issueRef == nil && e.tracker.ShouldCreateIssues() {
+				ref, err := e.tracker.CreateIssue(ctx, issuetracker.CreateIssueOpts{
+					Title:       opp.Summary,
+					Description: taskDescription,
+					Category:    opp.Category,
+				})
+				if err != nil {
+					slog.Warn("failed to create issue", "error", err, "summary", opp.Summary)
+				} else {
+					issueRef = ref
+				}
+			}
+		}
+
 		task := tadpole.Task{
 			Description:   taskDescription,
 			Summary:       opp.Summary,
@@ -324,6 +345,7 @@ func (e *Engine) processOpportunities(ctx context.Context, msgs []Message, oppor
 			EstSize:       opp.EstSize,
 			SlackChannel:  msg.Channel,
 			SlackThreadTS: threadTS,
+			IssueRef:      issueRef,
 		}
 
 		if err := e.spawn(ctx, task); err != nil {

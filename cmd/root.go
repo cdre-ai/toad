@@ -19,6 +19,7 @@ import (
 
 	"github.com/hergen/toad/internal/config"
 	"github.com/hergen/toad/internal/digest"
+	"github.com/hergen/toad/internal/issuetracker"
 	toadlog "github.com/hergen/toad/internal/log"
 	"github.com/hergen/toad/internal/reviewer"
 	"github.com/hergen/toad/internal/ribbit"
@@ -124,6 +125,9 @@ func runDaemon(cmd *cobra.Command, args []string) error {
 	tadpoleRunner := tadpole.NewRunner(cfg, slackClient, stateManager)
 	tadpolePool := tadpole.NewPool(tadpoleSem, tadpoleRunner)
 
+	// Initialize issue tracker
+	tracker := issuetracker.NewTracker(cfg.IssueTracker)
+
 	// 7. Initialize PR review watcher
 	prWatcher := reviewer.NewWatcher(stateDB, cfg.Repo.Path, func(ctx context.Context, task tadpole.Task) error {
 		return tadpolePool.Spawn(ctx, task)
@@ -156,12 +160,13 @@ func runDaemon(cmd *cobra.Command, args []string) error {
 				slackClient.React(channel, timestamp, emoji)
 			},
 			stateDB,
+			tracker,
 		)
 	}
 
 	// 9. Set up message handler — dispatch into goroutines so the event loop stays responsive
 	slackClient.OnMessage(func(ctx context.Context, msg *islack.IncomingMessage) {
-		go handleMessage(ctx, msg, triageEngine, ribbitEngine, slackClient, stateManager, ribbitSem, tadpolePool, digestEngine)
+		go handleMessage(ctx, msg, triageEngine, ribbitEngine, slackClient, stateManager, ribbitSem, tadpolePool, digestEngine, tracker)
 	})
 
 	// 8. Handle graceful shutdown
@@ -259,6 +264,7 @@ func handleMessage(
 	ribbitSem chan struct{},
 	tadpolePool *tadpole.Pool,
 	digestEngine *digest.Engine,
+	tracker issuetracker.Tracker,
 ) {
 	// Resolve channel name for context
 	channelName := slackClient.ResolveChannelName(msg.Channel)
@@ -268,7 +274,7 @@ func handleMessage(
 	// toad's own (bot) messages, so the fetched message will have IsBot=true.
 	if msg.IsTadpoleRequest {
 		slog.Info("handler: tadpole requested", "channel", channelName, "thread", msg.ThreadTS())
-		handleTadpoleRequest(ctx, msg, triageEngine, slackClient, stateManager, tadpolePool, channelName)
+		handleTadpoleRequest(ctx, msg, triageEngine, slackClient, stateManager, tadpolePool, channelName, tracker)
 		return
 	}
 
@@ -284,7 +290,7 @@ func handleMessage(
 			return
 		}
 
-		handleTriggered(ctx, msg, triageEngine, ribbitEngine, slackClient, stateManager, tadpolePool, channelName)
+		handleTriggered(ctx, msg, triageEngine, ribbitEngine, slackClient, stateManager, tadpolePool, channelName, tracker)
 		return
 	}
 
@@ -334,6 +340,7 @@ func handleTriggered(
 	stateManager *state.Manager,
 	tadpolePool *tadpole.Pool,
 	channelName string,
+	tracker issuetracker.Tracker,
 ) {
 	// Check if already working on this thread
 	threadTS := msg.ThreadTS()
@@ -421,6 +428,21 @@ func handleTriggered(
 		// (stack traces, file paths) are in the parent/earlier messages.
 		taskDescription := buildTaskDescription(msg.Text, msg.ThreadContext)
 
+		// Detect or create issue tracker reference
+		issueRef := tracker.ExtractIssueRef(taskDescription)
+		if issueRef == nil && tracker.ShouldCreateIssues() {
+			ref, err := tracker.CreateIssue(ctx, issuetracker.CreateIssueOpts{
+				Title:       result.Summary,
+				Description: taskDescription,
+				Category:    result.Category,
+			})
+			if err != nil {
+				slog.Warn("failed to create issue", "error", err, "summary", result.Summary)
+			} else {
+				issueRef = ref
+			}
+		}
+
 		task := tadpole.Task{
 			Description:   taskDescription,
 			Summary:       result.Summary,
@@ -429,6 +451,7 @@ func handleTriggered(
 			SlackChannel:  msg.Channel,
 			SlackThreadTS: threadTS,
 			TriageResult:  result,
+			IssueRef:      issueRef,
 		}
 
 		if err := tadpolePool.Spawn(ctx, task); err != nil {
@@ -524,6 +547,7 @@ func handleTadpoleRequest(
 	stateManager *state.Manager,
 	tadpolePool *tadpole.Pool,
 	channelName string,
+	tracker issuetracker.Tracker,
 ) {
 	threadTS := msg.ThreadTS()
 
@@ -577,14 +601,19 @@ func handleTadpoleRequest(
 		}
 	}
 
+	// Detect issue tracker reference (no creation for explicit requests)
+	taskDesc := buildTaskDescription(threadText, threadMsgs)
+	issueRef := tracker.ExtractIssueRef(taskDesc)
+
 	task := tadpole.Task{
-		Description:   buildTaskDescription(threadText, threadMsgs),
+		Description:   taskDesc,
 		Summary:       triageResult.Summary,
 		Category:      triageResult.Category,
 		EstSize:       triageResult.EstSize,
 		SlackChannel:  msg.Channel,
 		SlackThreadTS: threadTS,
 		TriageResult:  triageResult,
+		IssueRef:      issueRef,
 	}
 
 	slog.Info("spawning tadpole",

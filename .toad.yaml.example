@@ -24,6 +24,12 @@ repo:
   test_command: "go test ./..."
   lint_command: "golangci-lint run"
   default_branch: "main"
+  auto_merge: false              # Enable auto-merge on PRs (requires repo setting)
+  # Per-service validation for monorepos
+  # services:
+  #   - path: "web-app"
+  #     test_command: "make test"
+  #     lint_command: "make stan && make cs"
 
 limits:
   max_concurrent: 2            # Max parallel tadpoles
@@ -40,6 +46,24 @@ triage:
 claude:
   model: "sonnet"              # Model for tadpole code runs
   # append_system_prompt: ""   # Extra instructions for all tadpole runs
+
+digest:
+  enabled: false               # Opt-in batch analysis (Toad King)
+  # dry_run: false             # Collect + analyze but skip spawn/notify
+  batch_minutes: 5
+  min_confidence: 0.95
+  max_auto_spawn_hour: 3
+  allowed_categories: ["bug"]
+  max_est_size: "small"
+
+issue_tracker:
+  enabled: false               # Enable issue tracker integration
+  provider: "linear"           # "linear" (only supported provider for now)
+  # api_token: ""              # Or use TOAD_LINEAR_API_TOKEN env var
+  # team_id: ""                # Linear team ID for issue creation
+  create_issues: false         # Opt-in: create issues for opportunities without one
+  # bug_label_id: ""           # Optional Linear label for bugs
+  # feature_label_id: ""       # Optional Linear label for features
 
 log:
   level: "info"                # debug, info, warn, error
