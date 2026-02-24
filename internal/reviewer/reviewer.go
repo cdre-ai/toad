@@ -254,17 +254,16 @@ type ciStatus struct {
 
 // ghCheck represents a single check run from `gh pr checks --json`.
 type ghCheck struct {
-	Name       string `json:"name"`
-	State      string `json:"state"`      // "PENDING", "SUCCESS", "FAILURE", "ERROR", etc.
-	Conclusion string `json:"conclusion"` // "SUCCESS", "FAILURE", "NEUTRAL", etc.
-	DetailsURL string `json:"detailsUrl"`
+	Name  string `json:"name"`
+	State string `json:"state"` // "PENDING", "SUCCESS", "FAILURE", "ERROR", etc.
+	Link  string `json:"link"`  // details URL, e.g. GitHub Actions run link
 }
 
 // getCIStatus checks the CI status for a PR using `gh pr checks`.
 func (w *Watcher) getCIStatus(ctx context.Context, prNumber int) (*ciStatus, error) {
 	cmd := exec.CommandContext(ctx, "gh", "pr", "checks",
 		strconv.Itoa(prNumber),
-		"--json", "name,state,conclusion,detailsUrl",
+		"--json", "name,state,link",
 	)
 	cmd.Dir = w.repoPath
 
@@ -292,14 +291,13 @@ func (w *Watcher) getCIStatus(ctx context.Context, prNumber int) (*ciStatus, err
 
 	for _, c := range checks {
 		state := strings.ToUpper(c.State)
-		conclusion := strings.ToUpper(c.Conclusion)
 
 		switch {
 		case state == "PENDING" || state == "QUEUED" || state == "IN_PROGRESS":
 			hasPending = true
-		case conclusion == "FAILURE" || conclusion == "ERROR" || state == "FAILURE" || state == "ERROR":
+		case state == "FAILURE" || state == "ERROR":
 			hasFailure = true
-			if id := extractRunID(c.DetailsURL); id != "" {
+			if id := extractRunID(c.Link); id != "" {
 				failedIDs[id] = true
 			}
 		}
