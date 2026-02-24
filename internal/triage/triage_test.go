@@ -69,6 +69,34 @@ func TestParseResult_LeadingText(t *testing.T) {
 	}
 }
 
+func TestParseResult_ProseWithBracesBeforeJSON(t *testing.T) {
+	// Reproduces the bug: prose contains {} before the real JSON object
+	input := `The method protects activeFilters[scope] with ?? {} but does not protect activeFiltersValues.
+
+{"actionable":true,"confidence":0.95,"summary":"null ref in filtersStore","category":"bug","estimated_size":"small","keywords":["filters"],"files_hint":["filtersStore.ts"]}`
+	result, err := parseResult([]byte(input))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !result.Actionable {
+		t.Error("expected actionable=true, got false (parser likely matched stray {} in prose)")
+	}
+	if result.Category != "bug" {
+		t.Errorf("expected category 'bug', got %q", result.Category)
+	}
+}
+
+func TestParseResult_CodeFencedWithProse(t *testing.T) {
+	input := "Here is my analysis of the issue:\n```json\n{\"actionable\":true,\"confidence\":0.8,\"summary\":\"test\",\"category\":\"feature\",\"estimated_size\":\"small\",\"keywords\":[],\"files_hint\":[]}\n```\nThat's my assessment."
+	result, err := parseResult([]byte(input))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result.Category != "feature" {
+		t.Errorf("expected category 'feature', got %q", result.Category)
+	}
+}
+
 func TestParseResult_InvalidJSON(t *testing.T) {
 	_, err := parseResult([]byte("not json at all"))
 	if err == nil {

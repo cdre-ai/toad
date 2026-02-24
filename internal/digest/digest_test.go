@@ -287,6 +287,45 @@ func TestParseOpportunities_WithTrailingText(t *testing.T) {
 	}
 }
 
+func TestParseOpportunities_ProseWithBracketsBeforeJSON(t *testing.T) {
+	// Prose contains [...] before the real JSON array
+	data := []byte(`Common patterns like [x for x in items] are not relevant here.
+
+[{"summary":"fix bug","category":"bug","confidence":0.96,"estimated_size":"small","message_index":0,"keywords":["err"],"files_hint":["main.go"]}]`)
+	opps, err := parseOpportunities(data)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(opps) != 1 {
+		t.Fatalf("expected 1 opportunity, got %d", len(opps))
+	}
+	if opps[0].Summary != "fix bug" {
+		t.Errorf("expected 'fix bug', got %q", opps[0].Summary)
+	}
+}
+
+func TestParseOpportunities_CodeFencedWithProse(t *testing.T) {
+	data := []byte("Here are the results:\n```json\n[{\"summary\":\"fix\",\"category\":\"bug\",\"confidence\":0.9,\"estimated_size\":\"tiny\",\"message_index\":0}]\n```\nThat's all.")
+	opps, err := parseOpportunities(data)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(opps) != 1 {
+		t.Errorf("expected 1 opportunity, got %d", len(opps))
+	}
+}
+
+func TestParseOpportunities_EmptyArrayWithProse(t *testing.T) {
+	data := []byte("No opportunities found in this batch.\n\n[]")
+	opps, err := parseOpportunities(data)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(opps) != 0 {
+		t.Errorf("expected 0 opportunities, got %d", len(opps))
+	}
+}
+
 func TestParseOpportunities_NoArray(t *testing.T) {
 	_, err := parseOpportunities([]byte(`no json here`))
 	if err == nil {

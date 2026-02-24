@@ -1,6 +1,10 @@
 package cmd
 
-import "testing"
+import (
+	"encoding/json"
+	"strings"
+	"testing"
+)
 
 func TestBuildTaskDescription_NoContext(t *testing.T) {
 	result := buildTaskDescription("fix the bug", nil)
@@ -130,6 +134,72 @@ func TestFindMatchingBrace_DeeplyNested(t *testing.T) {
 	idx := findMatchingBrace(s, 0)
 	if idx != len(s)-1 {
 		t.Errorf("expected %d, got %d", len(s)-1, idx)
+	}
+}
+
+// TestParseInvestigateResult_ProseWithStrayBraces reproduces the exact bug:
+// Claude returns prose containing "?? {}" before the real JSON, causing the
+// old parser to extract "{}" and silently default feasible to false.
+func TestParseInvestigateResult_ProseWithStrayBraces(t *testing.T) {
+	// This is the exact pattern from the assetListCollection incident
+	resultText := `Based on my research, the method protects activeFilters[scope] with ?? {} but does not protect activeFiltersValues[scope].
+
+{"feasible": true, "task_spec": "Add null guard in filtersStore.ts", "reasoning": "Clear one-line fix"}`
+
+	text := resultText
+	var result struct {
+		Feasible  bool   `json:"feasible"`
+		TaskSpec  string `json:"task_spec"`
+		Reasoning string `json:"reasoning"`
+	}
+	parsed := false
+
+	// Strategy 1: look for {"feasible" directly
+	if idx := strings.Index(text, `{"feasible"`); idx >= 0 {
+		if end := findMatchingBrace(text, idx); end >= 0 {
+			if err := json.Unmarshal([]byte(text[idx:end+1]), &result); err == nil {
+				parsed = true
+			}
+		}
+	}
+
+	if !parsed {
+		t.Fatal("failed to parse — strategy 1 should have found the JSON")
+	}
+	if !result.Feasible {
+		t.Error("expected feasible=true — parser likely matched stray {} in prose")
+	}
+	if result.TaskSpec == "" {
+		t.Error("expected non-empty task_spec")
+	}
+	if result.Reasoning == "" {
+		t.Error("expected non-empty reasoning")
+	}
+}
+
+func TestStripCodeFences_WithJSON(t *testing.T) {
+	input := "Some text\n```json\n{\"feasible\": true}\n```\nMore text"
+	got := stripCodeFences(input)
+	expected := "{\"feasible\": true}\n"
+	if got != expected {
+		t.Errorf("expected %q, got %q", expected, got)
+	}
+}
+
+func TestStripCodeFences_NoFences(t *testing.T) {
+	input := `{"feasible": true}`
+	got := stripCodeFences(input)
+	if got != input {
+		t.Errorf("expected input unchanged, got %q", got)
+	}
+}
+
+func TestStripCodeFences_PlainFences(t *testing.T) {
+	input := "```\n{\"feasible\": false}\n```"
+	got := stripCodeFences(input)
+	expected := "{\"feasible\": false}\n"
+	if got != expected {
+		t.Errorf("expected %q, got %q", expected, got)
 	}
 }
 
