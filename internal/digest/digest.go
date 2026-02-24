@@ -223,10 +223,12 @@ func (e *Engine) processOpportunities(ctx context.Context, msgs []Message, oppor
 
 		e.totalOpps.Add(1)
 
-		// Cross-batch dedup: skip if the same summary was already processed recently
+		// Cross-batch dedup: skip if a similar opportunity was already processed recently.
+		// Uses keyword overlap to catch semantically equivalent issues with different wording.
 		if e.db != nil {
-			if recent, err := e.db.HasRecentOpportunity(opp.Summary, 1*time.Hour); err == nil && recent {
-				slog.Info("digest skipping duplicate opportunity (already processed recently)",
+			kw := strings.Join(opp.Keywords, ",")
+			if recent, err := e.db.HasRecentOpportunity(opp.Summary, kw, 1*time.Hour); err == nil && recent {
+				slog.Info("digest skipping duplicate opportunity (similar recently processed)",
 					"summary", opp.Summary)
 				continue
 			}

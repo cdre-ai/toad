@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	_ "modernc.org/sqlite" // SQLite driver
@@ -402,11 +403,14 @@ func (d *DB) SaveDigestOpportunity(opp *DigestOpportunity) error {
 	return err
 }
 
-// HasRecentOpportunity checks if an opportunity with the same summary was already
-// processed within the given duration. Used for cross-batch dedup to avoid
-// re-investigating the same issue flagged in consecutive digest cycles.
-func (d *DB) HasRecentOpportunity(summary string, within time.Duration) (bool, error) {
+// HasRecentOpportunity checks if a similar opportunity was already processed
+// within the given duration. Uses keyword overlap to catch semantically
+// equivalent issues that Haiku summarized with slightly different wording.
+// Falls back to exact summary match when keywords are unavailable.
+func (d *DB) HasRecentOpportunity(summary string, keywords string, within time.Duration) (bool, error) {
 	cutoff := time.Now().Add(-within)
+
+	// Fast path: exact summary match
 	var count int
 	err := d.db.QueryRow(
 		"SELECT COUNT(*) FROM digest_opportunities WHERE summary = ? AND created_at > ?",
@@ -415,7 +419,68 @@ func (d *DB) HasRecentOpportunity(summary string, within time.Duration) (bool, e
 	if err != nil {
 		return false, err
 	}
-	return count > 0, nil
+	if count > 0 {
+		return true, nil
+	}
+
+	// Fuzzy path: keyword overlap with recent opportunities
+	if keywords == "" {
+		return false, nil
+	}
+
+	rows, err := d.db.Query(
+		"SELECT keywords FROM digest_opportunities WHERE created_at > ? AND keywords != ''",
+		cutoff,
+	)
+	if err != nil {
+		return false, err
+	}
+	defer rows.Close()
+
+	newKW := normalizeKeywords(keywords)
+	for rows.Next() {
+		var existingKW string
+		if err := rows.Scan(&existingKW); err != nil {
+			continue
+		}
+		if keywordOverlap(newKW, normalizeKeywords(existingKW)) >= 0.5 {
+			return true, nil
+		}
+	}
+	return false, rows.Err()
+}
+
+// normalizeKeywords splits a comma-separated keyword string into a set of
+// lowercased terms. Multi-word keywords are also split into individual words
+// so that "red dot indicator" matches "red dot" and "indicator".
+func normalizeKeywords(kw string) map[string]bool {
+	set := make(map[string]bool)
+	for _, part := range strings.Split(kw, ",") {
+		for _, word := range strings.Fields(strings.ToLower(strings.TrimSpace(part))) {
+			if len(word) > 1 { // skip single-char noise
+				set[word] = true
+			}
+		}
+	}
+	return set
+}
+
+// keywordOverlap returns the Jaccard similarity between two keyword sets.
+func keywordOverlap(a, b map[string]bool) float64 {
+	if len(a) == 0 || len(b) == 0 {
+		return 0
+	}
+	intersection := 0
+	for k := range a {
+		if b[k] {
+			intersection++
+		}
+	}
+	union := len(a) + len(b) - intersection
+	if union == 0 {
+		return 0
+	}
+	return float64(intersection) / float64(union)
 }
 
 // RecentDigestOpportunities returns the most recent digest opportunities, newest first.

@@ -604,7 +604,7 @@ func TestDB_HasRecentOpportunity(t *testing.T) {
 	db := openTestDB(t)
 
 	// No opportunities yet
-	has, err := db.HasRecentOpportunity("fix the bug", 1*time.Hour)
+	has, err := db.HasRecentOpportunity("fix the bug", "", 1*time.Hour)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -623,21 +623,109 @@ func TestDB_HasRecentOpportunity(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// Now it should be found
-	has, err = db.HasRecentOpportunity("fix the bug", 1*time.Hour)
+	// Exact summary match still works
+	has, err = db.HasRecentOpportunity("fix the bug", "", 1*time.Hour)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if !has {
-		t.Error("expected to find recent opportunity")
+		t.Error("expected to find recent opportunity by exact summary")
 	}
 
-	// Different summary should not match
-	has, err = db.HasRecentOpportunity("different bug", 1*time.Hour)
+	// Different summary, no keywords — should not match
+	has, err = db.HasRecentOpportunity("different bug", "", 1*time.Hour)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if has {
-		t.Error("expected no match for different summary")
+		t.Error("expected no match for different summary without keywords")
+	}
+}
+
+func TestDB_HasRecentOpportunity_KeywordOverlap(t *testing.T) {
+	db := openTestDB(t)
+
+	// Save opportunity with keywords
+	opp := &DigestOpportunity{
+		Summary:   "Red dot indicator misaligned with actual alert severity in meter details",
+		Category:  "bug",
+		Keywords:  "meter,alert,red dot,indicator,severity,misalignment",
+		Channel:   "C123",
+		CreatedAt: time.Now(),
+	}
+	if err := db.SaveDigestOpportunity(opp); err != nil {
+		t.Fatal(err)
+	}
+
+	// Different summary but overlapping keywords should match
+	has, err := db.HasRecentOpportunity(
+		"Red dot indicator misaligned with actual alert severity in meter alert view",
+		"meter alert,red dot indicator,misaligned,alert severity",
+		1*time.Hour,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !has {
+		t.Error("expected keyword overlap to detect duplicate")
+	}
+
+	// Completely different keywords should not match
+	has, err = db.HasRecentOpportunity(
+		"Fix login page CSS",
+		"login,css,styling,page",
+		1*time.Hour,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if has {
+		t.Error("expected no match for unrelated keywords")
+	}
+}
+
+func TestKeywordOverlap(t *testing.T) {
+	tests := []struct {
+		name   string
+		a, b   string
+		expect float64
+		above  float64
+	}{
+		{
+			name:  "identical",
+			a:     "meter,alert,red dot",
+			b:     "meter,alert,red dot",
+			above: 0.99,
+		},
+		{
+			name:  "high overlap with different phrasing",
+			a:     "meter,alert,red dot,indicator,severity,misalignment",
+			b:     "meter alert,red dot indicator,misaligned,alert severity",
+			above: 0.5,
+		},
+		{
+			name:   "no overlap",
+			a:      "login,css,styling",
+			b:      "meter,alert,severity",
+			expect: 0,
+		},
+		{
+			name:  "useBreadcrumb duplicates",
+			a:     "useBreadcrumb_experimental,breadcrumb,company,null,initialization",
+			b:     "useBreadcrumb_experimental,company,null,initialization,breadcrumb",
+			above: 0.99,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			score := keywordOverlap(normalizeKeywords(tt.a), normalizeKeywords(tt.b))
+			if tt.above > 0 && score < tt.above {
+				t.Errorf("expected overlap >= %.2f, got %.2f", tt.above, score)
+			}
+			if tt.expect == 0 && tt.above == 0 && score != 0 {
+				t.Errorf("expected overlap == 0, got %.2f", score)
+			}
+		})
 	}
 }
