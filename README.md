@@ -41,12 +41,32 @@ Slack message → Triage (Haiku, ~1s) → Route by category:
 
 ## 🚀 Install
 
-### Homebrew (recommended)
+### macOS and Linux
+
+Install with [Homebrew](https://brew.sh/) (recommended):
 
 ```bash
-brew tap cdre-ai/tap
-brew install toad
+brew tap cdre-ai/tap https://github.com/cdre-ai/homebrew-tap
+brew install --cask toad
 ```
+
+> **macOS security note:** If macOS blocks the app with "cannot be opened because the developer cannot be verified", the cask's post-install hook should handle this automatically. If not:
+> ```bash
+> xattr -d com.apple.quarantine $(which toad)
+> ```
+
+### Windows
+
+Install with [Scoop](https://scoop.sh/):
+
+```bash
+scoop bucket add cdre-ai https://github.com/cdre-ai/homebrew-tap
+scoop install toad
+```
+
+### Binary releases
+
+Download pre-built binaries for Windows, macOS, or Linux from the [latest release](https://github.com/cdre-ai/toad/releases/latest).
 
 ### Go install
 
