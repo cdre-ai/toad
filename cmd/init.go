@@ -201,9 +201,56 @@ func (m wizardModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case stepSummary:
 			return m.updateSummary(msg)
 		}
+
+	default:
+		// Forward non-key messages (paste, clipboard results) to the active textinput
+		return m.forwardToActiveInput(msg)
 	}
 
 	return m, nil
+}
+
+// forwardToActiveInput routes paste and other messages to the focused textinput.
+func (m wizardModel) forwardToActiveInput(msg tea.Msg) (tea.Model, tea.Cmd) {
+	var cmd tea.Cmd
+	switch m.step {
+	case stepSlack:
+		if m.focusedInput == 0 {
+			m.appTokenInput, cmd = m.appTokenInput.Update(msg)
+		} else {
+			m.botTokenInput, cmd = m.botTokenInput.Update(msg)
+		}
+	case stepRepo:
+		if m.focusedInput == 0 {
+			m.repoPathInput, cmd = m.repoPathInput.Update(msg)
+		} else {
+			m.repoNameInput, cmd = m.repoNameInput.Update(msg)
+		}
+	case stepRepoCommands:
+		switch m.cmdFocusedField {
+		case 0:
+			m.testCmdInput, cmd = m.testCmdInput.Update(msg)
+		case 1:
+			m.lintCmdInput, cmd = m.lintCmdInput.Update(msg)
+		}
+	case stepAdvanced:
+		switch m.advSection {
+		case 0:
+			switch m.advCursor {
+			case 0:
+				m.channelsInput, cmd = m.channelsInput.Update(msg)
+			case 1:
+				m.emojiInput, cmd = m.emojiInput.Update(msg)
+			case 2:
+				m.keywordsInput, cmd = m.keywordsInput.Update(msg)
+			}
+		case 2:
+			if m.advCursor == 1 {
+				m.labelsInput, cmd = m.labelsInput.Update(msg)
+			}
+		}
+	}
+	return m, cmd
 }
 
 // ── Step updates ─────────────────────────────────────
@@ -819,31 +866,17 @@ func (m wizardModel) contentWidth() int {
 
 // ── Step views ───────────────────────────────────────
 
-const toadLogo = `
- ████████╗ ██████╗  █████╗ ██████╗
- ╚══██╔══╝██╔═══██╗██╔══██╗██╔══██╗
-    ██║   ██║   ██║███████║██║  ██║
-    ██║   ██║   ██║██╔══██║██║  ██║
-    ██║   ╚██████╔╝██║  ██║██████╔╝
-    ╚═╝    ╚═════╝ ╚═╝  ╚═╝╚═════╝`
-
-const toadFrog = `
-         ╭━━━╮ ╭━━━╮
-        ┃ ● ┃━┃ ● ┃
-         ╰┳━━━━━━┳╯
-    ╭━━━━━┻━━━━━━┻━━━━━╮
-    ┃  ╭──╮      ╭──╮  ┃
-    ┃  ╰──╯  ^^  ╰──╯  ┃
-    ╰━━┳━━━━━━━━━━━━┳━━╯
-       ┃  ╱╲    ╱╲  ┃
-       ╰━╱  ╲━━╱  ╲━╯`
+const toadBanner = `                    ████████╗ ██████╗  █████╗ ██████╗
+   @..@             ╚══██╔══╝██╔═══██╗██╔══██╗██╔══██╗
+  (----)               ██║   ██║   ██║███████║██║  ██║
+ ( >__< )              ██║   ██║   ██║██╔══██║██║  ██║
+  ^^ ~~^^              ██║   ╚██████╔╝██║  ██║██████╔╝
+                       ╚═╝    ╚═════╝ ╚═╝  ╚═╝╚═════╝`
 
 func (m wizardModel) viewWelcome() string {
 	var b strings.Builder
 
-	b.WriteString(tui.SelectedStyle.Render(toadLogo))
-	b.WriteString("\n")
-	b.WriteString(tui.DimStyle.Render(toadFrog))
+	b.WriteString(tui.SelectedStyle.Render(toadBanner))
 	b.WriteString("\n\n")
 	b.WriteString("AI-powered coding assistant that lives in Slack.\n")
 	b.WriteString("Monitors channels, answers questions, and fixes bugs\n")
