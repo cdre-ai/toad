@@ -131,7 +131,7 @@ func runDaemon(cmd *cobra.Command, args []string) error {
 	// 7. Initialize PR review watcher
 	prWatcher := reviewer.NewWatcher(stateDB, cfg.Repo.Path, func(ctx context.Context, task tadpole.Task) error {
 		return tadpolePool.Spawn(ctx, task)
-	}, slackClient, cfg.Limits.MaxReviewRounds)
+	}, slackClient, cfg.Limits.MaxReviewRounds, cfg.Limits.MaxCIFixRounds, cfg.Triage.Model)
 
 	// Wire PR review tracking — after a successful ship, register the PR for review watching
 	tadpoleRunner.OnShip(func(prURL, branch, runID string, task tadpole.Task) {

@@ -58,6 +58,7 @@ type LimitsConfig struct {
 	MaxBudgetUSD    float64 `yaml:"max_budget_usd"`
 	MaxRetries      int     `yaml:"max_retries"`
 	MaxReviewRounds int     `yaml:"max_review_rounds"`
+	MaxCIFixRounds  int     `yaml:"max_ci_fix_rounds"`
 }
 
 type TriageConfig struct {
@@ -120,6 +121,7 @@ func defaults() *Config {
 			MaxBudgetUSD:    1.0,
 			MaxRetries:      1,
 			MaxReviewRounds: 3,
+			MaxCIFixRounds:  2,
 		},
 		Triage: TriageConfig{
 			Model:     "haiku",

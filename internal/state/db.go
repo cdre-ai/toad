@@ -95,6 +95,7 @@ func migrate(db *sql.DB) error {
 			slack_thread    TEXT,
 			last_comment_id INTEGER DEFAULT 0,
 			fix_count       INTEGER DEFAULT 0,
+			ci_fix_count    INTEGER DEFAULT 0,
 			created_at      DATETIME NOT NULL,
 			closed          BOOLEAN DEFAULT FALSE
 		);
@@ -134,6 +135,15 @@ func migrate(db *sql.DB) error {
 		}
 		if _, err := db.Exec(`ALTER TABLE digest_opportunities ADD COLUMN reasoning TEXT NOT NULL DEFAULT ''`); err != nil {
 			slog.Warn("migration: failed to add reasoning column", "error", err)
+		}
+	}
+
+	// Add ci_fix_count column for existing databases that predate CI fix watching.
+	var ciFixCountExists int
+	_ = db.QueryRow(`SELECT COUNT(*) FROM pragma_table_info('pr_watches') WHERE name = 'ci_fix_count'`).Scan(&ciFixCountExists)
+	if ciFixCountExists == 0 {
+		if _, err := db.Exec(`ALTER TABLE pr_watches ADD COLUMN ci_fix_count INTEGER DEFAULT 0`); err != nil {
+			slog.Warn("migration: failed to add ci_fix_count column", "error", err)
 		}
 	}
 
@@ -286,11 +296,11 @@ func (d *DB) SavePRWatch(prNumber int, prURL, branch, runID, slackChannel, slack
 	return err
 }
 
-// OpenPRWatches returns all PRs being monitored (not closed, under fix limit).
-func (d *DB) OpenPRWatches(maxReviewRounds int) ([]*PRWatch, error) {
+// OpenPRWatches returns all PRs being monitored (not closed, under either fix limit).
+func (d *DB) OpenPRWatches(maxReviewRounds, maxCIFixRounds int) ([]*PRWatch, error) {
 	rows, err := d.db.Query(
-		"SELECT pr_number, pr_url, branch, run_id, slack_channel, slack_thread, last_comment_id, fix_count FROM pr_watches WHERE closed = FALSE AND fix_count < ?",
-		maxReviewRounds,
+		"SELECT pr_number, pr_url, branch, run_id, slack_channel, slack_thread, last_comment_id, fix_count, ci_fix_count FROM pr_watches WHERE closed = FALSE AND (fix_count < ? OR ci_fix_count < ?)",
+		maxReviewRounds, maxCIFixRounds,
 	)
 	if err != nil {
 		return nil, err
@@ -300,7 +310,7 @@ func (d *DB) OpenPRWatches(maxReviewRounds int) ([]*PRWatch, error) {
 	var watches []*PRWatch
 	for rows.Next() {
 		var w PRWatch
-		if err := rows.Scan(&w.PRNumber, &w.PRURL, &w.Branch, &w.RunID, &w.SlackChannel, &w.SlackThread, &w.LastCommentID, &w.FixCount); err != nil {
+		if err := rows.Scan(&w.PRNumber, &w.PRURL, &w.Branch, &w.RunID, &w.SlackChannel, &w.SlackThread, &w.LastCommentID, &w.FixCount, &w.CIFixCount); err != nil {
 			return nil, err
 		}
 		watches = append(watches, &w)
@@ -313,6 +323,15 @@ func (d *DB) UpdatePRWatchLastComment(prNumber, lastCommentID int) error {
 	_, err := d.db.Exec(
 		"UPDATE pr_watches SET last_comment_id = ?, fix_count = fix_count + 1 WHERE pr_number = ?",
 		lastCommentID, prNumber,
+	)
+	return err
+}
+
+// IncrementCIFixCount bumps the CI fix attempt counter for a PR watch.
+func (d *DB) IncrementCIFixCount(prNumber int) error {
+	_, err := d.db.Exec(
+		"UPDATE pr_watches SET ci_fix_count = ci_fix_count + 1 WHERE pr_number = ?",
+		prNumber,
 	)
 	return err
 }
@@ -579,6 +598,7 @@ type PRWatch struct {
 	SlackThread   string
 	LastCommentID int
 	FixCount      int
+	CIFixCount    int
 }
 
 // ThreadMemory holds cached context for a Slack thread.

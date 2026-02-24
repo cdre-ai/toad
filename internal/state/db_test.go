@@ -252,7 +252,7 @@ func TestDB_PRWatch(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	watches, err := db.OpenPRWatches(3)
+	watches, err := db.OpenPRWatches(3, 3)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -272,7 +272,7 @@ func TestDB_PRWatch_ClosedExcluded(t *testing.T) {
 	db.SavePRWatch(42, "https://github.com/pr/42", "fix-bug", "run-1", "C123", "ts-1")
 	db.ClosePRWatch(42)
 
-	watches, _ := db.OpenPRWatches(3)
+	watches, _ := db.OpenPRWatches(3, 3)
 	if len(watches) != 0 {
 		t.Error("closed PR should not appear in open watches")
 	}
@@ -282,14 +282,76 @@ func TestDB_PRWatch_FixCountLimit(t *testing.T) {
 	db := openTestDB(t)
 	db.SavePRWatch(42, "https://github.com/pr/42", "fix-bug", "run-1", "C123", "ts-1")
 
-	// Increment fix count 3 times
+	// Increment review fix count 3 times
 	for i := 0; i < 3; i++ {
 		db.UpdatePRWatchLastComment(42, i+1)
 	}
 
-	watches, _ := db.OpenPRWatches(3)
+	// PR should still appear — CI fix budget is not exhausted
+	watches, _ := db.OpenPRWatches(3, 3)
+	if len(watches) != 1 {
+		t.Error("PR at review fix limit should still appear when CI fix budget remains")
+	}
+
+	// Exhaust CI fix budget too
+	for i := 0; i < 3; i++ {
+		db.IncrementCIFixCount(42)
+	}
+
+	watches, _ = db.OpenPRWatches(3, 3)
 	if len(watches) != 0 {
-		t.Error("PR at fix limit should not appear in open watches")
+		t.Error("PR at both fix limits should not appear in open watches")
+	}
+}
+
+func TestDB_PRWatch_CIFixCount(t *testing.T) {
+	db := openTestDB(t)
+	db.SavePRWatch(42, "https://github.com/pr/42", "fix-bug", "run-1", "C123", "ts-1")
+
+	// Increment CI fix count
+	if err := db.IncrementCIFixCount(42); err != nil {
+		t.Fatal(err)
+	}
+
+	watches, _ := db.OpenPRWatches(3, 3)
+	if len(watches) != 1 {
+		t.Fatalf("expected 1 watch, got %d", len(watches))
+	}
+	if watches[0].CIFixCount != 1 {
+		t.Errorf("ci_fix_count: got %d, want 1", watches[0].CIFixCount)
+	}
+
+	// Increment again
+	db.IncrementCIFixCount(42)
+
+	watches, _ = db.OpenPRWatches(3, 3)
+	if len(watches) != 1 {
+		t.Fatalf("expected 1 watch, got %d", len(watches))
+	}
+	if watches[0].CIFixCount != 2 {
+		t.Errorf("ci_fix_count: got %d, want 2", watches[0].CIFixCount)
+	}
+
+	// Watch stays open when only CI fix budget is exhausted but review budget remains
+	watches, _ = db.OpenPRWatches(3, 2)
+	if len(watches) != 1 {
+		t.Error("PR should still be open when review budget remains")
+	}
+
+	// Watch stays open when only review budget is exhausted but CI fix budget remains
+	for i := 0; i < 3; i++ {
+		db.UpdatePRWatchLastComment(42, i+1)
+	}
+	watches, _ = db.OpenPRWatches(3, 3)
+	if len(watches) != 1 {
+		t.Error("PR should still be open when CI fix budget remains")
+	}
+
+	// Watch excluded when BOTH budgets are exhausted
+	db.IncrementCIFixCount(42) // now ci_fix_count=3
+	watches, _ = db.OpenPRWatches(3, 3)
+	if len(watches) != 0 {
+		t.Error("PR should not appear when both budgets are exhausted")
 	}
 }
 
