@@ -112,6 +112,19 @@ type ghPR struct {
 }
 
 func (w *Watcher) checkPR(ctx context.Context, watch *state.PRWatch) error {
+	// 0. Skip if a tadpole is already running for this thread — avoids branch collision
+	// when the previous fix is still in progress and the worktree holds the branch.
+	if watch.SlackThread != "" {
+		if run, err := w.db.GetByThread(watch.SlackThread); err == nil && run != nil {
+			slog.Debug("tadpole already running for thread, skipping PR check",
+				"pr", watch.PRNumber,
+				"run_id", run.ID,
+				"status", run.Status,
+			)
+			return nil
+		}
+	}
+
 	// 1. Check PR state — close the watch if merged/closed
 	prState, err := w.getPRState(ctx, watch.PRNumber)
 	if err != nil {
