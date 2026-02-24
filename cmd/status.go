@@ -10,6 +10,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"sync"
 	"time"
 
@@ -64,6 +65,7 @@ func runStatus(cmd *cobra.Command, args []string) error {
 
 type apiResponse struct {
 	Daemon        *apiDaemon       `json:"daemon"`
+	Integrations  []apiIntegration `json:"integrations"`
 	Stats         *state.Stats     `json:"stats"`
 	Active        []apiRun         `json:"active"`
 	History       []apiRun         `json:"history"`
@@ -86,8 +88,15 @@ type apiOpportunity struct {
 	CreatedAt  int64   `json:"created_at"`
 }
 
+type apiIntegration struct {
+	Name   string `json:"name"`
+	Status string `json:"status"` // "enabled", "disabled", "dry-run", "active", "inactive"
+	Detail string `json:"detail,omitempty"`
+}
+
 type apiDaemon struct {
 	Running          bool             `json:"running"`
+	Version          string           `json:"version"`
 	Uptime           float64          `json:"uptime_s,omitempty"`
 	PID              int              `json:"pid,omitempty"`
 	Ribbits          int64            `json:"ribbits"`
@@ -193,7 +202,7 @@ func apiDataHandler(db *state.DB, cfg *config.Config) http.HandlerFunc {
 		}
 
 		// Daemon status — running if heartbeat within last 30s
-		daemon := &apiDaemon{}
+		daemon := &apiDaemon{Version: Version}
 		if daemonStats != nil && now.Sub(daemonStats.Heartbeat) < 30*time.Second {
 			daemon.Running = true
 			daemon.Uptime = now.Sub(daemonStats.StartedAt).Seconds()
@@ -212,6 +221,67 @@ func apiDataHandler(db *state.DB, cfg *config.Config) http.HandlerFunc {
 			daemon.DigestSpawns = daemonStats.DigestSpawns
 		}
 		resp.Daemon = daemon
+
+		// Build integrations status
+		var integrations []apiIntegration
+
+		// Digest
+		digestInt := apiIntegration{Name: "Digest"}
+		if daemon.Running {
+			if daemon.DigestEnabled {
+				if daemon.DigestDryRun {
+					digestInt.Status = "dry-run"
+					digestInt.Detail = "Dry-run"
+				} else {
+					digestInt.Status = "enabled"
+					digestInt.Detail = "Enabled"
+				}
+			} else {
+				digestInt.Status = "disabled"
+				digestInt.Detail = "Disabled"
+			}
+		} else {
+			digestInt.Status = "disabled"
+			digestInt.Detail = "Disabled"
+		}
+		integrations = append(integrations, digestInt)
+
+		// Issue Tracker
+		issueInt := apiIntegration{Name: "Issue Tracker"}
+		if cfg != nil && cfg.IssueTracker.Enabled {
+			issueInt.Status = "enabled"
+			provider := cfg.IssueTracker.Provider
+			if provider == "" {
+				provider = "Linear"
+			} else {
+				// Capitalize first letter
+				issueInt.Detail = strings.ToUpper(provider[:1]) + provider[1:]
+				provider = issueInt.Detail
+			}
+			issueInt.Detail = provider
+		} else {
+			issueInt.Status = "disabled"
+			issueInt.Detail = "Disabled"
+		}
+		integrations = append(integrations, issueInt)
+
+		// PR Reviewer
+		reviewerInt := apiIntegration{Name: "PR Reviewer"}
+		if daemon.Running {
+			reviewerInt.Status = "enabled"
+			watchCount := len(watches)
+			if watchCount > 0 {
+				reviewerInt.Detail = fmt.Sprintf("Active (%d watching)", watchCount)
+			} else {
+				reviewerInt.Detail = "Active"
+			}
+		} else {
+			reviewerInt.Status = "disabled"
+			reviewerInt.Detail = "Inactive"
+		}
+		integrations = append(integrations, reviewerInt)
+
+		resp.Integrations = integrations
 
 		for _, r := range activeRuns {
 			resp.Active = append(resp.Active, apiRun{
@@ -451,6 +521,29 @@ const dashboardHTML = `<!DOCTYPE html>
   .refresh-info { color: var(--dim); font-size: 12px; }
   @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:0.3} }
 
+  /* Integrations row */
+  .integrations {
+    display: flex;
+    gap: 8px;
+    margin-bottom: 16px;
+    flex-wrap: wrap;
+  }
+  .integration-pill {
+    display: inline-flex; align-items: center; gap: 5px;
+    font-size: 12px; font-weight: 500;
+    padding: 3px 10px; border-radius: 12px;
+    background: var(--surface); border: 1px solid var(--border);
+  }
+  .integration-pill .dot {
+    width: 6px; height: 6px; border-radius: 50%;
+  }
+  .integration-pill.enabled .dot { background: var(--green); }
+  .integration-pill.enabled { color: var(--text); }
+  .integration-pill.disabled .dot { background: var(--dim); }
+  .integration-pill.disabled { color: var(--dim); }
+  .integration-pill.dry-run .dot { background: var(--amber); }
+  .integration-pill.dry-run { color: var(--amber); }
+
   /* Stats cards */
   .stats {
     display: grid;
@@ -621,6 +714,8 @@ const dashboardHTML = `<!DOCTYPE html>
 
 <div id="error-bar" class="error-bar"></div>
 
+<div class="integrations" id="integrations-row"></div>
+
 <!-- Stats cards -->
 <div class="stats" id="stats-row">
   <div class="stat-card"><div class="label">Tadpole Runs</div><div class="value" id="s-total">-</div><div class="sub" id="s-breakdown"></div></div>
@@ -780,13 +875,24 @@ async function refresh() {
     const dm = d.daemon || {};
     const badge = document.getElementById('daemon-badge');
     const dtxt = document.getElementById('daemon-text');
+    const ver = dm.version ? 'v' + dm.version : '';
     if (dm.running) {
       badge.className = 'daemon-badge online';
-      dtxt.textContent = 'Online \u2014 ' + fmtUptime(dm.uptime_s) + ' (PID ' + dm.pid + ')';
+      dtxt.textContent = 'Online \u2014 ' + fmtUptime(dm.uptime_s) + (ver ? ' \u00b7 ' + ver : '') + ' (PID ' + dm.pid + ')';
     } else {
       badge.className = 'daemon-badge offline';
-      dtxt.textContent = 'Offline';
+      dtxt.textContent = 'Offline' + (ver ? ' \u00b7 ' + ver : '');
     }
+
+    // Integrations pills
+    const integ = d.integrations || [];
+    let ihtml = '';
+    for (const ig of integ) {
+      ihtml += '<span class="integration-pill ' + esc(ig.status) + '">'
+        + '<span class="dot"></span>' + esc(ig.name) + ': ' + esc(ig.detail)
+        + '</span>';
+    }
+    document.getElementById('integrations-row').innerHTML = ihtml;
 
     // Stats cards
     const st = d.stats || {};

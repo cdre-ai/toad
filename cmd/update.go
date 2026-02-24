@@ -76,7 +76,7 @@ func runUpdate(cmd *cobra.Command, args []string) error {
 
 	fmt.Println()
 	fmt.Println("  " + dimStyle.Render("Upgrading toad..."))
-	upgradeCmd := exec.Command("brew", "upgrade", "toad")
+	upgradeCmd := exec.Command("brew", "upgrade", "--cask", "toad")
 	upgradeOutput, upgradeErr := upgradeCmd.CombinedOutput()
 	if upgradeErr != nil {
 		errMsg := strings.TrimSpace(string(upgradeOutput))
