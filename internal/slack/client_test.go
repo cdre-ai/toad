@@ -3,6 +3,7 @@ package slack
 import (
 	"strings"
 	"testing"
+	"time"
 
 	goslack "github.com/slack-go/slack"
 )
@@ -201,5 +202,57 @@ func TestHasKeywordTrigger_MultipleKeywords(t *testing.T) {
 func TestHasKeywordTrigger_PartialNoMatch(t *testing.T) {
 	if hasKeywordTrigger("toad", []string{"toad fix"}) {
 		t.Error("partial keyword should not match")
+	}
+}
+
+func TestBuildPathScrubber_ReplacesPath(t *testing.T) {
+	scrub := buildPathScrubber(map[string]string{
+		"/Users/hergen/Documents/scaler/scaler-mono": "scaler-mono",
+	})
+	input := "The file is at /Users/hergen/Documents/scaler/scaler-mono/src/main.go"
+	result := scrub(input)
+	expected := "The file is at <scaler-mono>/src/main.go"
+	if result != expected {
+		t.Errorf("expected %q, got %q", expected, result)
+	}
+}
+
+func TestBuildPathScrubber_LongestFirst(t *testing.T) {
+	scrub := buildPathScrubber(map[string]string{
+		"/Users/hergen/Documents":                    "docs",
+		"/Users/hergen/Documents/scaler/scaler-mono": "scaler-mono",
+	})
+	input := "path: /Users/hergen/Documents/scaler/scaler-mono/file.go"
+	result := scrub(input)
+	// Longest path should match first, not the shorter prefix
+	if strings.Contains(result, "<docs>") {
+		t.Errorf("shorter path matched before longer — got %q", result)
+	}
+	expected := "path: <scaler-mono>/file.go"
+	if result != expected {
+		t.Errorf("expected %q, got %q", expected, result)
+	}
+}
+
+func TestBuildPathScrubber_MultiplePaths(t *testing.T) {
+	scrub := buildPathScrubber(map[string]string{
+		"/Users/hergen/Documents/scaler/scaler-mono": "scaler-mono",
+		"/Users/hergen/Documents/scaler/audits-php":  "audits-php",
+	})
+	input := "repos: /Users/hergen/Documents/scaler/scaler-mono and /Users/hergen/Documents/scaler/audits-php"
+	result := scrub(input)
+	if strings.Contains(result, "/Users/hergen") {
+		t.Errorf("absolute path not scrubbed: %q", result)
+	}
+	if !strings.Contains(result, "<scaler-mono>") || !strings.Contains(result, "<audits-php>") {
+		t.Errorf("expected both repo names, got %q", result)
+	}
+}
+
+func TestSetPathScrubber_EmptyMap(t *testing.T) {
+	c := &Client{seen: make(map[string]time.Time), replies: make(map[string]time.Time)}
+	c.SetPathScrubber(map[string]string{})
+	if c.pathScrubber != nil {
+		t.Error("expected nil scrubber for empty map")
 	}
 }

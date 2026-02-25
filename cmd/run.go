@@ -60,18 +60,18 @@ func runTadpole(cmd *cobra.Command, args []string) error {
 	sm := state.NewManager()
 	runner := tadpole.NewRunner(cfg, nil, sm)
 
-	allRepoPaths := make([]string, len(cfg.Repos))
-	for i, r := range cfg.Repos {
-		allRepoPaths[i] = r.Path
+	repoPaths := make(map[string]string, len(cfg.Repos))
+	for _, r := range cfg.Repos {
+		repoPaths[r.Path] = r.Name
 	}
 
 	task := tadpole.Task{
-		Description:  taskDesc,
-		Summary:      taskDesc,
-		Category:     "manual",
-		EstSize:      "unknown",
-		Repo:         repo,
-		AllRepoPaths: allRepoPaths,
+		Description: taskDesc,
+		Summary:     taskDesc,
+		Category:    "manual",
+		EstSize:     "unknown",
+		Repo:        repo,
+		RepoPaths:   repoPaths,
 	}
 
 	ctx := context.Background()

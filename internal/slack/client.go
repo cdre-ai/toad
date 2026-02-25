@@ -5,6 +5,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -45,16 +46,17 @@ type MessageHandler func(ctx context.Context, msg *IncomingMessage)
 
 // Client manages the Slack Socket Mode connection and event routing.
 type Client struct {
-	api       *slack.Client
-	socket    *socketmode.Client
-	channels  map[string]bool
-	triggers  config.Triggers
-	handler   MessageHandler
-	botUserID string
-	seen      map[string]time.Time // dedup: key → first-seen time
-	seenMu    sync.Mutex
-	replies   map[string]time.Time // toad's own reply timestamps (channel:ts → sent time)
-	repliesMu sync.Mutex
+	api          *slack.Client
+	socket       *socketmode.Client
+	channels     map[string]bool
+	triggers     config.Triggers
+	handler      MessageHandler
+	botUserID    string
+	seen         map[string]time.Time // dedup: key → first-seen time
+	seenMu       sync.Mutex
+	replies      map[string]time.Time // toad's own reply timestamps (channel:ts → sent time)
+	repliesMu    sync.Mutex
+	pathScrubber func(string) string // replaces absolute paths with repo-relative
 }
 
 // NewClient creates a new Slack client configured for Socket Mode.
@@ -431,3 +433,35 @@ func (c *Client) routeEvent(ctx context.Context, evt socketmode.Event) {
 		slog.Error("Slack connection error", "data", evt.Data)
 	}
 }
+
+// SetPathScrubber configures the client to replace absolute filesystem paths
+// in outbound messages with repo names. repoPaths maps absolute path → repo name.
+func (c *Client) SetPathScrubber(repoPaths map[string]string) {
+	if len(repoPaths) == 0 {
+		return
+	}
+	c.pathScrubber = buildPathScrubber(repoPaths)
+}
+
+// buildPathScrubber creates a function that replaces absolute paths with repo names.
+// Paths are sorted longest-first to avoid partial matches.
+func buildPathScrubber(repoPaths map[string]string) func(string) string {
+	type entry struct {
+		path string
+		name string
+	}
+	entries := make([]entry, 0, len(repoPaths))
+	for p, n := range repoPaths {
+		entries = append(entries, entry{path: p, name: n})
+	}
+	sort.Slice(entries, func(i, j int) bool {
+		return len(entries[i].path) > len(entries[j].path)
+	})
+	return func(text string) string {
+		for _, e := range entries {
+			text = strings.ReplaceAll(text, e.path, "<"+e.name+">")
+		}
+		return text
+	}
+}
+

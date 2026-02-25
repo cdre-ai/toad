@@ -10,6 +10,9 @@ import (
 
 // ReplyInThread posts a message as a thread reply and tracks it as a toad reply.
 func (c *Client) ReplyInThread(channel, threadTS, text string) (string, error) {
+	if c.pathScrubber != nil {
+		text = c.pathScrubber(text)
+	}
 	_, ts, err := c.api.PostMessage(
 		channel,
 		slack.MsgOptionText(text, false),
@@ -72,6 +75,9 @@ func (c *Client) GetPermalink(channel, timestamp string) (string, error) {
 
 // UpdateMessage edits an existing message (for status updates).
 func (c *Client) UpdateMessage(channel, timestamp, newText string) error {
+	if c.pathScrubber != nil {
+		newText = c.pathScrubber(newText)
+	}
 	_, _, _, err := c.api.UpdateMessage(
 		channel,
 		timestamp,

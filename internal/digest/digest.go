@@ -86,8 +86,8 @@ type Engine struct {
 	investigate  InvestigateFunc
 	react        ReactFunc
 	resolveRepo  ResolveRepoFunc
-	allRepoPaths []string
-	repoProfiles string // formatted repo profiles for multi-repo prompt, empty for single-repo
+	repoPaths    map[string]string // path → name, for cross-repo prompts and path scrubbing
+	repoProfiles string            // formatted repo profiles for multi-repo prompt, empty for single-repo
 	db           *state.DB
 	tracker      issuetracker.Tracker
 
@@ -107,18 +107,18 @@ type Engine struct {
 }
 
 // New creates a digest engine.
-func New(cfg *config.DigestConfig, triageModel string, spawn SpawnFunc, notify NotifyFunc, investigate InvestigateFunc, react ReactFunc, resolveRepo ResolveRepoFunc, allRepoPaths []string, profiles []config.RepoProfile, db *state.DB, tracker issuetracker.Tracker) *Engine {
+func New(cfg *config.DigestConfig, triageModel string, spawn SpawnFunc, notify NotifyFunc, investigate InvestigateFunc, react ReactFunc, resolveRepo ResolveRepoFunc, repoPaths map[string]string, profiles []config.RepoProfile, db *state.DB, tracker issuetracker.Tracker) *Engine {
 	e := &Engine{
-		cfg:          cfg,
-		model:        triageModel,
-		spawn:        spawn,
-		notify:       notify,
-		investigate:  investigate,
-		react:        react,
-		resolveRepo:  resolveRepo,
-		allRepoPaths: allRepoPaths,
-		db:           db,
-		tracker:      tracker,
+		cfg:         cfg,
+		model:       triageModel,
+		spawn:       spawn,
+		notify:      notify,
+		investigate: investigate,
+		react:       react,
+		resolveRepo: resolveRepo,
+		repoPaths:   repoPaths,
+		db:          db,
+		tracker:     tracker,
 	}
 	if len(profiles) > 1 {
 		e.repoProfiles = config.FormatForPrompt(profiles)
@@ -357,8 +357,8 @@ func (e *Engine) processOpportunities(ctx context.Context, msgs []Message, oppor
 			SlackChannel:  msg.Channel,
 			SlackThreadTS: threadTS,
 			IssueRef:      issueRef,
-			Repo:          repo,
-			AllRepoPaths:  e.allRepoPaths,
+			Repo:      repo,
+			RepoPaths: e.repoPaths,
 		}
 
 		// Post a message explaining the autonomous detection before spawning,
