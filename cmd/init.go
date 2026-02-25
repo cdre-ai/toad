@@ -14,6 +14,14 @@ import (
 	"github.com/hergen/toad/internal/tui"
 )
 
+// Key constants for repeated Bubble Tea key strings.
+const (
+	keyEnter    = "enter"
+	keyEsc      = "esc"
+	keyDown     = "down"
+	keyShiftTab = "shift+tab"
+)
+
 var initCmd = &cobra.Command{
 	Use:   "init",
 	Short: "Set up toad in the current directory",
@@ -60,7 +68,6 @@ func stepIndex(s wizardStep) int {
 
 type wizardModel struct {
 	step     wizardStep
-	cursor   int
 	width    int
 	height   int
 	quitting bool
@@ -258,10 +265,10 @@ func (m wizardModel) forwardToActiveInput(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 func (m wizardModel) updateWelcome(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch msg.String() {
-	case "enter", " ":
+	case keyEnter, " ":
 		m.step = stepSlackGuide
 		return m, nil
-	case "q", "esc":
+	case "q", keyEsc:
 		m.quitting = true
 		return m, tea.Quit
 	}
@@ -270,11 +277,11 @@ func (m wizardModel) updateWelcome(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 func (m wizardModel) updateSlackGuide(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch msg.String() {
-	case "enter", " ":
+	case keyEnter, " ":
 		m.step = stepSlack
 		m.appTokenInput.Focus()
 		return m, nil
-	case "esc":
+	case keyEsc:
 		m.step = stepWelcome
 		return m, nil
 	}
@@ -283,21 +290,21 @@ func (m wizardModel) updateSlackGuide(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 func (m wizardModel) updateSlack(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch msg.String() {
-	case "tab", "down":
+	case "tab", keyDown:
 		if m.focusedInput == 0 {
 			m.focusedInput = 1
 			m.appTokenInput.Blur()
 			m.botTokenInput.Focus()
 		}
 		return m, nil
-	case "shift+tab", "up":
+	case keyShiftTab, "up":
 		if m.focusedInput == 1 {
 			m.focusedInput = 0
 			m.botTokenInput.Blur()
 			m.appTokenInput.Focus()
 		}
 		return m, nil
-	case "enter":
+	case keyEnter:
 		app := m.appTokenInput.Value()
 		bot := m.botTokenInput.Value()
 		if !strings.HasPrefix(app, "xapp-") {
@@ -314,7 +321,7 @@ func (m wizardModel) updateSlack(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.repoPathInput.Focus()
 		m.focusedInput = 0
 		return m, nil
-	case "esc":
+	case keyEsc:
 		m.step = stepSlackGuide
 		m.appTokenInput.Blur()
 		m.botTokenInput.Blur()
@@ -332,21 +339,21 @@ func (m wizardModel) updateSlack(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 func (m wizardModel) updateRepo(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch msg.String() {
-	case "tab", "down":
+	case "tab", keyDown:
 		if m.focusedInput == 0 {
 			m.focusedInput = 1
 			m.repoPathInput.Blur()
 			m.repoNameInput.Focus()
 		}
 		return m, nil
-	case "shift+tab", "up":
+	case keyShiftTab, "up":
 		if m.focusedInput == 1 {
 			m.focusedInput = 0
 			m.repoNameInput.Blur()
 			m.repoPathInput.Focus()
 		}
 		return m, nil
-	case "enter":
+	case keyEnter:
 		path := m.repoPathInput.Value()
 		name := m.repoNameInput.Value()
 		if err := validateRepoPath(path); err != nil {
@@ -381,7 +388,7 @@ func (m wizardModel) updateRepo(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 		m.step = stepToadKing
 		return m, nil
-	case "esc":
+	case keyEsc:
 		m.step = stepSlack
 		m.repoPathInput.Blur()
 		m.repoNameInput.Blur()
@@ -405,13 +412,13 @@ func (m wizardModel) updateToadKing(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		if m.toadKingCursor > 0 {
 			m.toadKingCursor--
 		}
-	case "down", "j":
+	case keyDown, "j":
 		if m.toadKingCursor < 2 {
 			m.toadKingCursor++
 		}
-	case "enter":
+	case keyEnter:
 		m.step = stepAdvancedAsk
-	case "esc":
+	case keyEsc:
 		m.step = stepRepo
 		m.repoPathInput.Focus()
 		m.focusedInput = 0
@@ -421,9 +428,9 @@ func (m wizardModel) updateToadKing(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 func (m wizardModel) updateAdvancedAsk(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch msg.String() {
-	case "up", "down", "k", "j":
+	case "up", keyDown, "k", "j":
 		m.advancedCursor = 1 - m.advancedCursor
-	case "enter":
+	case keyEnter:
 		if m.advancedCursor == 1 {
 			m.step = stepAdvanced
 			m.advSection = 0
@@ -432,15 +439,14 @@ func (m wizardModel) updateAdvancedAsk(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		} else {
 			m.step = stepSummary
 		}
-	case "esc":
+	case keyEsc:
 		m.step = stepToadKing
 	}
 	return m, nil
 }
 
 func (m wizardModel) updateAdvanced(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
-	switch msg.String() {
-	case "esc":
+	if msg.String() == keyEsc {
 		if m.advSection > 0 {
 			m.advSection--
 			m.advCursor = 0
@@ -470,17 +476,17 @@ func (m wizardModel) updateAdvanced(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 func (m wizardModel) updateAdvTriggers(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch msg.String() {
-	case "tab", "down":
+	case "tab", keyDown:
 		m.blurAllAdvanced()
 		m.advCursor = (m.advCursor + 1) % 3
 		m.focusAdvancedField()
 		return m, nil
-	case "shift+tab", "up":
+	case keyShiftTab, "up":
 		m.blurAllAdvanced()
 		m.advCursor = (m.advCursor + 2) % 3
 		m.focusAdvancedField()
 		return m, nil
-	case "enter":
+	case keyEnter:
 		m.blurAllAdvanced()
 		m.advSection = 1 // validation
 		m.advCursor = 0
@@ -508,7 +514,7 @@ func (m wizardModel) updateAdvValidation(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.advCursor = 1
 			m.testCmdInput.Focus()
 			return m, nil
-		case "enter":
+		case keyEnter:
 			m.blurAllAdvanced()
 			m.advSection = 2 // models
 			m.advCursor = 0
@@ -518,12 +524,12 @@ func (m wizardModel) updateAdvValidation(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 	// Custom validation enabled — 3 fields: toggle(0), test(1), lint(2)
 	switch msg.String() {
-	case "tab", "down":
+	case "tab", keyDown:
 		m.blurAllAdvanced()
 		m.advCursor = (m.advCursor + 1) % 3
 		m.focusAdvancedField()
 		return m, nil
-	case "shift+tab", "up":
+	case keyShiftTab, "up":
 		m.blurAllAdvanced()
 		m.advCursor = (m.advCursor + 2) % 3
 		m.focusAdvancedField()
@@ -542,7 +548,7 @@ func (m wizardModel) updateAdvValidation(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.blurAllAdvanced()
 			return m, nil
 		}
-	case "enter":
+	case keyEnter:
 		m.blurAllAdvanced()
 		m.advSection = 2 // models
 		m.advCursor = 0
@@ -562,9 +568,9 @@ func (m wizardModel) updateAdvValidation(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 func (m wizardModel) updateAdvModels(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch msg.String() {
-	case "tab", "down":
+	case "tab", keyDown:
 		m.advCursor = (m.advCursor + 1) % 3
-	case "shift+tab", "up":
+	case keyShiftTab, "up":
 		m.advCursor = (m.advCursor + 2) % 3
 	case "left":
 		switch m.advCursor {
@@ -596,7 +602,7 @@ func (m wizardModel) updateAdvModels(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		if m.advCursor == 2 {
 			m.autoSpawn = !m.autoSpawn
 		}
-	case "enter":
+	case keyEnter:
 		m.advSection = 3 // repo opts
 		m.advCursor = 0
 	}
@@ -605,13 +611,13 @@ func (m wizardModel) updateAdvModels(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 func (m wizardModel) updateAdvRepoOpts(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch msg.String() {
-	case "tab", "down":
+	case "tab", keyDown:
 		m.blurAllAdvanced()
 		m.advCursor = (m.advCursor + 1) % 2
 		if m.advCursor == 1 {
 			m.labelsInput.Focus()
 		}
-	case "shift+tab", "up":
+	case keyShiftTab, "up":
 		m.blurAllAdvanced()
 		m.advCursor = (m.advCursor + 1) % 2
 		if m.advCursor == 1 {
@@ -625,7 +631,7 @@ func (m wizardModel) updateAdvRepoOpts(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		if m.advCursor == 0 {
 			m.autoMerge = !m.autoMerge
 		}
-	case "enter":
+	case keyEnter:
 		m.blurAllAdvanced()
 		m.advSection = 4 // log
 		m.advCursor = 0
@@ -645,11 +651,11 @@ func (m wizardModel) updateAdvLog(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		if m.logLevel > 0 {
 			m.logLevel--
 		}
-	case "down", "j":
+	case keyDown, "j":
 		if m.logLevel < 3 {
 			m.logLevel++
 		}
-	case "enter":
+	case keyEnter:
 		m.step = stepSummary
 	}
 	return m, nil
@@ -687,7 +693,7 @@ func (m *wizardModel) focusAdvancedField() {
 
 func (m wizardModel) updateSummary(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch msg.String() {
-	case "enter", "y":
+	case keyEnter, "y":
 		if err := m.writeConfig(); err != nil {
 			m.err = err.Error()
 			return m, nil
@@ -695,7 +701,7 @@ func (m wizardModel) updateSummary(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.configWritten = true
 		m.step = stepDone
 		return m, tea.Quit
-	case "esc", "n":
+	case keyEsc, "n":
 		m.step = stepAdvancedAsk
 	}
 	return m, nil
@@ -1364,7 +1370,7 @@ func runInit(cmd *cobra.Command, args []string) error {
 	if _, err := os.Stat(".toad.yaml"); err == nil {
 		fmt.Printf("  .toad.yaml already exists. Overwrite? [y/N] ")
 		var answer string
-		fmt.Scanln(&answer)
+		fmt.Scanln(&answer) //nolint:errcheck // interactive prompt, error irrelevant
 		if answer != "y" && answer != "Y" {
 			fmt.Println("  Canceled.")
 			return nil

@@ -71,7 +71,7 @@ func suggestCommands(stack, repoPath string) (testCmd, lintCmd string) {
 		for _, f := range []string{".golangci.yml", ".golangci.yaml", ".golangci.toml"} {
 			if _, err := os.Stat(filepath.Join(repoPath, f)); err == nil {
 				lintCmd = "golangci-lint run"
-				return
+				return testCmd, lintCmd
 			}
 		}
 		lintCmd = "go vet ./..."
@@ -107,10 +107,10 @@ func suggestCommands(stack, repoPath string) (testCmd, lintCmd string) {
 			lintCmd = "make stan && make cs"
 		} else {
 			testCmd = "./vendor/bin/phpunit"
-			lintCmd = "./vendor/bin/phpstan analyse"
+			lintCmd = "./vendor/bin/phpstan analyse" //nolint:misspell // phpstan's actual command name
 		}
 	}
-	return
+	return testCmd, lintCmd
 }
 
 // parseIntOr parses a string as int, returning fallback on failure.

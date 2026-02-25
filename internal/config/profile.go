@@ -134,45 +134,51 @@ func readTopDirs(repoPath string) []string {
 
 func readREADMEFirstParagraph(repoPath string) string {
 	for _, name := range []string{"README.md", "readme.md", "README"} {
-		f, err := os.Open(filepath.Join(repoPath, name))
-		if err != nil {
-			continue
+		if text := readFirstParagraphFrom(filepath.Join(repoPath, name)); text != "" {
+			return text
 		}
-		defer f.Close()
-
-		scanner := bufio.NewScanner(f)
-		var paragraph strings.Builder
-		inParagraph := false
-
-		for scanner.Scan() {
-			line := strings.TrimSpace(scanner.Text())
-
-			// Skip headings and blank lines before the first paragraph
-			if !inParagraph {
-				if line == "" || strings.HasPrefix(line, "#") || strings.HasPrefix(line, "![") {
-					continue
-				}
-				inParagraph = true
-			}
-
-			// End of paragraph
-			if inParagraph && line == "" {
-				break
-			}
-
-			if paragraph.Len() > 0 {
-				paragraph.WriteString(" ")
-			}
-			paragraph.WriteString(line)
-		}
-
-		text := paragraph.String()
-		if len(text) > 100 {
-			text = text[:97] + "..."
-		}
-		return text
 	}
 	return ""
+}
+
+func readFirstParagraphFrom(path string) string {
+	f, err := os.Open(path)
+	if err != nil {
+		return ""
+	}
+	defer f.Close()
+
+	scanner := bufio.NewScanner(f)
+	var paragraph strings.Builder
+	inParagraph := false
+
+	for scanner.Scan() {
+		line := strings.TrimSpace(scanner.Text())
+
+		// Skip headings and blank lines before the first paragraph
+		if !inParagraph {
+			if line == "" || strings.HasPrefix(line, "#") || strings.HasPrefix(line, "![") {
+				continue
+			}
+			inParagraph = true
+		}
+
+		// End of paragraph
+		if inParagraph && line == "" {
+			break
+		}
+
+		if paragraph.Len() > 0 {
+			paragraph.WriteString(" ")
+		}
+		paragraph.WriteString(line)
+	}
+
+	text := paragraph.String()
+	if len(text) > 100 {
+		text = text[:97] + "..."
+	}
+	return text
 }
 
 func compileSummary(p RepoProfile) string {
@@ -240,7 +246,7 @@ func readFirstLine(path string) string {
 // extractJSONString does a quick regex-free extraction of a top-level string field.
 // Good enough for "name": "value" in package.json / composer.json.
 func extractJSONString(data []byte, key string) string {
-	needle := fmt.Sprintf(`"%s"`, key)
+	needle := fmt.Sprintf("%q", key)
 	s := string(data)
 	idx := strings.Index(s, needle)
 	if idx < 0 {
