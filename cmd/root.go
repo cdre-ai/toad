@@ -1102,4 +1102,3 @@ func buildVCSResolver(cfg *config.Config) (vcs.Resolver, error) {
 	}
 	return vcs.NewResolver(repoVCS, fallbackCfg)
 }
-

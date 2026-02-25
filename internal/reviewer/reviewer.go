@@ -441,4 +441,3 @@ func extractResultText(output []byte) string {
 	}
 	return strings.TrimSpace(string(output))
 }
-

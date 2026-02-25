@@ -102,8 +102,8 @@ type IssueTrackerConfig struct {
 
 type VCSConfig struct {
 	Platform     string   `yaml:"platform"`      // "github" (default), "gitlab"
-	Host         string   `yaml:"host"`           // optional: self-hosted GitLab hostname
-	BotUsernames []string `yaml:"bot_usernames"`  // usernames to treat as bots (GitLab)
+	Host         string   `yaml:"host"`          // optional: self-hosted GitLab hostname
+	BotUsernames []string `yaml:"bot_usernames"` // usernames to treat as bots (GitLab)
 }
 
 type LogConfig struct {

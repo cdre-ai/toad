@@ -246,12 +246,12 @@ func (g *GitLabProvider) GetCIFailureLogs(ctx context.Context, failedRunIDs []st
 
 // glabNote represents a note (comment) from the GitLab API.
 type glabNote struct {
-	ID        int    `json:"id"`
-	Body      string `json:"body"`
-	System    bool   `json:"system"`
-	Author    struct {
+	ID     int    `json:"id"`
+	Body   string `json:"body"`
+	System bool   `json:"system"`
+	Author struct {
 		Username string `json:"username"`
-		Bot      bool   `json:"bot"`      // GitLab 16.8+
+		Bot      bool   `json:"bot"` // GitLab 16.8+
 	} `json:"author"`
 	Position *struct {
 		NewPath string `json:"new_path"`
