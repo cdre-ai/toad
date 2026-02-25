@@ -191,6 +191,8 @@ func runDaemon(cmd *cobra.Command, args []string) error {
 			func(channel, timestamp, emoji string) {
 				slackClient.React(channel, timestamp, emoji)
 			},
+			stateManager.Claim,
+			stateManager.Unclaim,
 			resolver.Resolve,
 			repoPaths,
 			profiles,

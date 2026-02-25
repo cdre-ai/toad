@@ -59,6 +59,13 @@ type NotifyFunc func(channel, threadTS, text string)
 // ReactFunc adds an emoji reaction to a message.
 type ReactFunc func(channel, timestamp, emoji string)
 
+// ClaimFunc atomically claims a thread to prevent duplicate spawns.
+// Returns true if the claim succeeded (thread was free).
+type ClaimFunc func(threadTS string) bool
+
+// UnclaimFunc releases a thread claim without registering a run (error cleanup).
+type UnclaimFunc func(threadTS string)
+
 // ResolveRepoFunc resolves a repo config from triage hints.
 type ResolveRepoFunc func(triageRepo string, fileHints []string) *config.RepoConfig
 
@@ -85,6 +92,8 @@ type Engine struct {
 	notify       NotifyFunc
 	investigate  InvestigateFunc
 	react        ReactFunc
+	claim        ClaimFunc
+	unclaim      UnclaimFunc
 	resolveRepo  ResolveRepoFunc
 	repoPaths    map[string]string // path → name, for cross-repo prompts and path scrubbing
 	repoProfiles string            // formatted repo profiles for multi-repo prompt, empty for single-repo
@@ -107,13 +116,15 @@ type Engine struct {
 }
 
 // New creates a digest engine.
-func New(cfg *config.DigestConfig, triageModel string, spawn SpawnFunc, notify NotifyFunc, investigate InvestigateFunc, react ReactFunc, resolveRepo ResolveRepoFunc, repoPaths map[string]string, profiles []config.RepoProfile, db *state.DB, tracker issuetracker.Tracker) *Engine {
+func New(cfg *config.DigestConfig, triageModel string, spawn SpawnFunc, notify NotifyFunc, investigate InvestigateFunc, react ReactFunc, claim ClaimFunc, unclaim UnclaimFunc, resolveRepo ResolveRepoFunc, repoPaths map[string]string, profiles []config.RepoProfile, db *state.DB, tracker issuetracker.Tracker) *Engine {
 	e := &Engine{
 		cfg:         cfg,
 		model:       triageModel,
 		spawn:       spawn,
 		notify:      notify,
 		investigate: investigate,
+		claim:       claim,
+		unclaim:     unclaim,
 		react:       react,
 		resolveRepo: resolveRepo,
 		repoPaths:   repoPaths,
@@ -249,6 +260,18 @@ func (e *Engine) processOpportunities(ctx context.Context, msgs []Message, oppor
 		}
 		msg := msgs[opp.MessageIdx]
 
+		threadTS := msg.ThreadTS
+		if threadTS == "" {
+			threadTS = msg.Timestamp
+		}
+
+		// Claim thread early — before investigation — so a :frog: reaction spawn
+		// doesn't race with us during the (slow) Sonnet investigation call.
+		if e.claim != nil && !e.claim(threadTS) {
+			slog.Info("digest skipping: thread already claimed", "summary", opp.Summary, "thread", threadTS)
+			continue
+		}
+
 		// Save opportunity to DB in investigating state before the Sonnet deep-dive,
 		// so the dashboard shows an "investigating" spinner while work is in progress.
 		var dbOpp *state.DigestOpportunity
@@ -305,6 +328,9 @@ func (e *Engine) processOpportunities(ctx context.Context, msgs []Message, oppor
 		}
 
 		if dismissed {
+			if e.unclaim != nil {
+				e.unclaim(threadTS)
+			}
 			continue
 		}
 
@@ -312,6 +338,9 @@ func (e *Engine) processOpportunities(ctx context.Context, msgs []Message, oppor
 		// should not consume spawn slots.
 		if !e.trySpawn() {
 			slog.Info("digest hourly spawn limit reached", "limit", e.cfg.MaxAutoSpawnHour)
+			if e.unclaim != nil {
+				e.unclaim(threadTS)
+			}
 			return false
 		}
 
@@ -323,6 +352,9 @@ func (e *Engine) processOpportunities(ctx context.Context, msgs []Message, oppor
 				"channel", msg.ChannelName,
 			)
 			e.totalSpawns.Add(1)
+			if e.unclaim != nil {
+				e.unclaim(threadTS)
+			}
 			continue
 		}
 
@@ -331,11 +363,6 @@ func (e *Engine) processOpportunities(ctx context.Context, msgs []Message, oppor
 			"confidence", opp.Confidence,
 			"channel", msg.ChannelName,
 		)
-
-		threadTS := msg.ThreadTS
-		if threadTS == "" {
-			threadTS = msg.Timestamp
-		}
 
 		// Detect or create issue tracker reference
 		var issueRef *issuetracker.IssueRef
@@ -382,6 +409,9 @@ func (e *Engine) processOpportunities(ctx context.Context, msgs []Message, oppor
 
 		if err := e.spawn(ctx, task); err != nil {
 			slog.Error("digest spawn failed", "error", err, "summary", opp.Summary)
+			if e.unclaim != nil {
+				e.unclaim(threadTS)
+			}
 			if e.notify != nil {
 				e.notify(msg.Channel, threadTS,
 					":x: Toad King failed to spawn tadpole: "+err.Error())

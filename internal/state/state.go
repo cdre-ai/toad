@@ -163,6 +163,9 @@ func (m *Manager) Complete(runID string, result *RunResult) {
 	}
 	run.Result = result
 	delete(m.runs, runID)
+	if run.SlackThreadTS != "" {
+		delete(m.threads, run.SlackThreadTS)
+	}
 	m.history = append(m.history, run)
 	cap := m.historySize
 	if cap <= 0 {

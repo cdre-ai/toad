@@ -179,3 +179,41 @@ func TestConcurrentAccess(t *testing.T) {
 		t.Errorf("all runs should be complete, got %d active", len(m.Active()))
 	}
 }
+
+func TestClaimReleasedAfterComplete(t *testing.T) {
+	m := NewManager()
+
+	// Claim and track a run
+	if !m.Claim("thread-1") {
+		t.Fatal("initial claim should succeed")
+	}
+	m.Track(&Run{ID: "run-1", Status: "running", SlackThreadTS: "thread-1", StartedAt: time.Now()})
+
+	// While running, claim should fail
+	if m.Claim("thread-1") {
+		t.Error("claim should fail while run is active")
+	}
+
+	// Complete the run
+	m.Complete("run-1", &RunResult{Success: true})
+
+	// Thread should now be reclaimable
+	if !m.Claim("thread-1") {
+		t.Error("claim should succeed after run completes")
+	}
+}
+
+func TestClaimReleasedAfterFailure(t *testing.T) {
+	m := NewManager()
+
+	if !m.Claim("thread-2") {
+		t.Fatal("initial claim should succeed")
+	}
+	m.Track(&Run{ID: "run-2", Status: "running", SlackThreadTS: "thread-2", StartedAt: time.Now()})
+	m.Complete("run-2", &RunResult{Success: false, Error: "test failure"})
+
+	// Thread should be reclaimable after failure too
+	if !m.Claim("thread-2") {
+		t.Error("claim should succeed after failed run")
+	}
+}
