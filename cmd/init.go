@@ -6,8 +6,8 @@ import (
 	"path/filepath"
 	"strings"
 
-	tea "charm.land/bubbletea/v2"
 	"charm.land/bubbles/v2/textinput"
+	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 	"github.com/spf13/cobra"
 
@@ -890,8 +890,8 @@ func (m wizardModel) viewSlackGuide() string {
 	b.WriteString("Create a Slack app before continuing:\n\n")
 
 	steps := []struct {
-		num  string
-		text string
+		num    string
+		text   string
 		detail string
 	}{
 		{"1", "Go to https://api.slack.com/apps", "Create New App → From scratch"},

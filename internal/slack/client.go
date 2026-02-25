@@ -464,4 +464,3 @@ func buildPathScrubber(repoPaths map[string]string) func(string) string {
 		return text
 	}
 }
-

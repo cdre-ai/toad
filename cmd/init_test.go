@@ -38,9 +38,9 @@ func TestRenderConfig(t *testing.T) {
 			MaxFilesChanged: 5,
 			MaxRetries:      1,
 		},
-		Triage:  triageTemplateData{Model: "haiku", AutoSpawn: false},
-		Claude:  claudeTemplateData{Model: "sonnet"},
-		Digest:  digestTemplateData{Enabled: true, DryRun: true},
+		Triage: triageTemplateData{Model: "haiku", AutoSpawn: false},
+		Claude: claudeTemplateData{Model: "sonnet"},
+		Digest: digestTemplateData{Enabled: true, DryRun: true},
 		IssueTracker: issueTrackerTemplateData{
 			Enabled:      true,
 			Provider:     "linear",
@@ -110,11 +110,11 @@ func TestRenderConfig_NoChannels(t *testing.T) {
 		Repos: []repoTemplateData{
 			{Name: "app", Path: "/app", DefaultBranch: "main"},
 		},
-		Limits:  limitsTemplateData{MaxConcurrent: 2, MaxTurns: 30, TimeoutMinutes: 10, MaxFilesChanged: 5, MaxRetries: 1},
-		Triage:  triageTemplateData{Model: "haiku"},
-		Claude:  claudeTemplateData{Model: "sonnet"},
-		Digest:  digestTemplateData{Enabled: false},
-		Log:     logTemplateData{Level: "info"},
+		Limits: limitsTemplateData{MaxConcurrent: 2, MaxTurns: 30, TimeoutMinutes: 10, MaxFilesChanged: 5, MaxRetries: 1},
+		Triage: triageTemplateData{Model: "haiku"},
+		Claude: claudeTemplateData{Model: "sonnet"},
+		Digest: digestTemplateData{Enabled: false},
+		Log:    logTemplateData{Level: "info"},
 	}
 
 	out, err := renderConfig(data)
@@ -179,11 +179,11 @@ func TestRenderConfig_CommentsPresent(t *testing.T) {
 		Repos: []repoTemplateData{
 			{Name: "app", Path: "/app", DefaultBranch: "main"},
 		},
-		Limits:  limitsTemplateData{MaxConcurrent: 2, MaxTurns: 30, TimeoutMinutes: 10, MaxFilesChanged: 5, MaxRetries: 1},
-		Triage:  triageTemplateData{Model: "haiku"},
-		Claude:  claudeTemplateData{Model: "sonnet"},
-		Digest:  digestTemplateData{Enabled: true, DryRun: true},
-		Log:     logTemplateData{Level: "info"},
+		Limits: limitsTemplateData{MaxConcurrent: 2, MaxTurns: 30, TimeoutMinutes: 10, MaxFilesChanged: 5, MaxRetries: 1},
+		Triage: triageTemplateData{Model: "haiku"},
+		Claude: claudeTemplateData{Model: "sonnet"},
+		Digest: digestTemplateData{Enabled: true, DryRun: true},
+		Log:    logTemplateData{Level: "info"},
 	}
 
 	out, err := renderConfig(data)

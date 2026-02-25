@@ -369,8 +369,8 @@ func (e *Engine) processOpportunities(ctx context.Context, msgs []Message, oppor
 			SlackChannel:  msg.Channel,
 			SlackThreadTS: threadTS,
 			IssueRef:      issueRef,
-			Repo:      repo,
-			RepoPaths: e.repoPaths,
+			Repo:          repo,
+			RepoPaths:     e.repoPaths,
 		}
 
 		// Post a message explaining the autonomous detection before spawning,

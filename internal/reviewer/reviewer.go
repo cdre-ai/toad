@@ -617,7 +617,6 @@ func (w *Watcher) getReviewComments(ctx context.Context, prNumber int, repoPath 
 	return comments, nil
 }
 
-
 func (w *Watcher) getIssueComments(ctx context.Context, prNumber int, repoPath string) ([]ghComment, error) {
 	cmd := exec.CommandContext(ctx, "gh", "api",
 		fmt.Sprintf("repos/{owner}/{repo}/issues/%d/comments", prNumber),

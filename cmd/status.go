@@ -65,17 +65,17 @@ func runStatus(cmd *cobra.Command, args []string) error {
 }
 
 type apiResponse struct {
-	Daemon        *apiDaemon        `json:"daemon"`
-	Integrations  []apiIntegration  `json:"integrations"`
-	Stats         *state.Stats      `json:"stats"`
-	Active        []apiRun          `json:"active"`
-	History       []apiRun          `json:"history"`
-	Watches       []apiWatch        `json:"watches"`
-	Opportunities []apiOpportunity  `json:"opportunities"`
+	Daemon        *apiDaemon          `json:"daemon"`
+	Integrations  []apiIntegration    `json:"integrations"`
+	Stats         *state.Stats        `json:"stats"`
+	Active        []apiRun            `json:"active"`
+	History       []apiRun            `json:"history"`
+	Watches       []apiWatch          `json:"watches"`
+	Opportunities []apiOpportunity    `json:"opportunities"`
 	DigestCounts  *state.DigestCounts `json:"digest_counts,omitempty"`
-	Config        *apiConfig        `json:"config,omitempty"`
-	CCUsage       *apiCCUsage       `json:"cc_usage,omitempty"`
-	Now           int64             `json:"now"`
+	Config        *apiConfig          `json:"config,omitempty"`
+	CCUsage       *apiCCUsage         `json:"cc_usage,omitempty"`
+	Now           int64               `json:"now"`
 }
 
 type apiOpportunity struct {

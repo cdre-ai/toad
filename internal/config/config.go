@@ -33,17 +33,17 @@ type Triggers struct {
 }
 
 type RepoConfig struct {
-	Name          string          `yaml:"name"`
-	Path          string          `yaml:"path"`
-	Description   string          `yaml:"description"`
-	Primary       bool            `yaml:"primary"`
-	TestCommand   string          `yaml:"test_command"`
-	LintCommand   string          `yaml:"lint_command"`
-	DefaultBranch string          `yaml:"default_branch"`
+	Name           string          `yaml:"name"`
+	Path           string          `yaml:"path"`
+	Description    string          `yaml:"description"`
+	Primary        bool            `yaml:"primary"`
+	TestCommand    string          `yaml:"test_command"`
+	LintCommand    string          `yaml:"lint_command"`
+	DefaultBranch  string          `yaml:"default_branch"`
 	AutoMerge      bool            `yaml:"auto_merge"`
 	MergeBotFixups bool            `yaml:"merge_bot_fixups"`
 	PRLabels       []string        `yaml:"pr_labels"`
-	Services      []ServiceConfig `yaml:"services"`
+	Services       []ServiceConfig `yaml:"services"`
 }
 
 // ServiceConfig maps a subdirectory to its specific lint/test commands.
