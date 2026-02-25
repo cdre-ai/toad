@@ -203,7 +203,7 @@ func (g *GitHubProvider) GetPRComments(ctx context.Context, prNumber int, repoPa
 
 	// If both fetches failed, return error so caller knows we got nothing
 	if reviewErr != nil && issueErr != nil {
-		return nil, fmt.Errorf("failed to fetch PR comments: reviews: %w; issues: %v", reviewErr, issueErr)
+		return nil, fmt.Errorf("failed to fetch PR comments: reviews: %w; issues: %w", reviewErr, issueErr)
 	}
 
 	var all []PRComment

@@ -42,7 +42,7 @@ func (g *GitLabProvider) glabCmd(ctx context.Context, repoPath string, args ...s
 
 func (g *GitLabProvider) CreatePR(ctx context.Context, opts CreatePROpts) (string, error) {
 	// No --target-branch: glab defaults to the repo's default branch,
-	// which matches tadpole behaviour (worktrees branch off default_branch).
+	// which matches tadpole behavior (worktrees branch off default_branch).
 	args := []string{"mr", "create",
 		"--title", opts.Title,
 		"--description", opts.Body,
@@ -155,8 +155,7 @@ func (g *GitLabProvider) GetCIStatus(ctx context.Context, prNumber int, repoPath
 	}
 
 	var pipeline glabPipeline
-	if err := json.Unmarshal(mrStdout.Bytes(), &pipeline); err != nil {
-		// No pipeline or null — treat as success (no CI configured)
+	if err := json.Unmarshal(mrStdout.Bytes(), &pipeline); err != nil { //nolint:nilerr // No pipeline or null — treat as success (no CI configured)
 		return &CIStatus{State: "success"}, nil
 	}
 	if pipeline.ID == 0 {
