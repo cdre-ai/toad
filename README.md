@@ -82,180 +82,40 @@ cd toad
 make build
 ```
 
-## 🔧 Setup
+## 🔧 Quick start
 
-Run the interactive setup wizard:
+### 1. Run the setup wizard
 
 ```bash
 toad init
 ```
 
-This walks you through creating a Slack app and saves credentials to `.toad.yaml`. You'll need:
+This walks you through creating a Slack app, entering tokens, configuring your repo, and optional features. It saves everything to `.toad.yaml`.
 
-1. **Create a Slack app** at [api.slack.com/apps](https://api.slack.com/apps)
-2. **Enable Socket Mode** and generate an app-level token (`xapp-...`) with `connections:write` scope
-3. **Add bot token scopes**: `app_mentions:read`, `channels:history`, `channels:join`, `channels:read`, `chat:write`, `groups:history`, `groups:read`, `reactions:read`, `reactions:write`, `users:read`
-4. **Subscribe to events**: `app_mention`, `message.channels`, `message.groups`, `reaction_added`
-5. **Install to workspace** and copy the bot token (`xoxb-...`)
-
-## 🐸 Usage
-
-### Start the daemon
+### 2. Start the daemon
 
 ```bash
 toad
 ```
 
-Toad connects to Slack via Socket Mode, auto-joins public channels, and starts listening. Mention `@toad` or use trigger keywords to interact.
+Toad connects to Slack via Socket Mode, auto-joins public channels, and starts listening.
 
-### 🐣 CLI one-shot mode
+### 3. Try it out
 
-Spawn a tadpole directly from the command line without Slack:
+Mention `@toad` in any channel with a question or bug report and watch it work.
 
-```bash
-toad run "Fix the login bug in auth.go"
-toad run --repo frontend "Fix the login bug"  # multi-repo: specify which repo
-```
+> For detailed Slack app setup, configuration options, and advanced features, see the **[Setup Guide](SETUP.md)**.
 
-### 📊 Monitoring dashboard
+## 🐸 CLI commands
 
-```bash
-toad status
-```
-
-Opens a live web dashboard in your browser showing daemon status, active runs, history, triage breakdown, Toad King stats, PR watches, and config. Refreshes every 2 seconds.
-
-Use `--port 8080` to pin to a specific port.
-
-## ⚙️ Configuration
-
-Config is loaded in order (later overrides earlier):
-
-1. Built-in defaults
-2. `~/.toad/config.yaml` (global)
-3. `.toad.yaml` (project-local)
-4. Environment variables
-
-### Example `.toad.yaml`
-
-```yaml
-slack:
-  app_token: ${TOAD_SLACK_APP_TOKEN}  # or set env var directly
-  bot_token: ${TOAD_SLACK_BOT_TOKEN}
-  channels: []  # empty = all public channels
-  triggers:
-    emoji: frog
-    keywords: ["toad fix", "toad help"]
-
-repos:
-  - name: my-app
-    path: /path/to/your/repo       # absolute or relative (resolved to absolute)
-    default_branch: main
-    test_command: go test ./...
-    lint_command: go vet ./...
-    services:  # optional: per-service validation
-      - path: web-app
-        test_command: make test
-        lint_command: make stan && make cs
-  # - name: another-repo           # add more repos for multi-repo setups
-  #   path: /path/to/another/repo
-  #   primary: true                 # designate one as primary fallback
-
-limits:
-  max_concurrent: 2       # concurrent tadpoles
-  max_turns: 30           # Claude conversation turns per run
-  timeout_minutes: 10
-  max_files_changed: 5    # fail if more files changed
-  max_retries: 1
-
-triage:
-  model: haiku
-
-claude:
-  model: sonnet
-  append_system_prompt: ""  # extra instructions for Claude
-
-digest:
-  enabled: false          # opt-in batch analysis (Toad King)
-  batch_minutes: 5
-  min_confidence: 0.95
-  max_auto_spawn_hour: 3
-  allowed_categories: [bug]
-  max_est_size: small
-
-issue_tracker:
-  enabled: false          # enable issue tracker integration
-  provider: linear        # only "linear" for now
-  # api_token: ""         # or TOAD_LINEAR_API_TOKEN env var
-  # team_id: ""           # Linear team ID for issue creation
-  create_issues: false    # create issues for opportunities without one
-
-log:
-  level: info
-  file: ~/.toad/toad.log
-```
-
-### Environment variables
-
-Tokens can be set via environment instead of config:
-
-```bash
-export TOAD_SLACK_APP_TOKEN=xapp-...
-export TOAD_SLACK_BOT_TOKEN=xoxb-...
-export TOAD_LINEAR_API_TOKEN=lin_api_...  # optional, for Linear integration
-```
-
-## 💬 Interacting with toad
-
-| Action | How |
-|--------|-----|
-| 🐸 Ask a question | `@toad how does the auth middleware work?` |
-| 🐸 Trigger on keyword | `toad fix the broken date parser` |
-| 🐣 Request a tadpole | React with 🐸 on any toad reply |
-| 🐣 Bug/feature (auto) | `@toad` a bug report or feature request — auto-spawns a tadpole |
-
-### 🥚 → 🐣 → 🐸 Message flow
-
-1. **🥚 Triage** — Haiku classifies the message (~1 second): actionable? category? size?
-2. **Route** — Bugs and features spawn tadpoles. Questions get ribbit replies.
-3. **🐣 Tadpole** — Creates worktree, runs Claude Code, validates, retries, ships PR.
-4. **🐸 Ribbit** — Sonnet answers with codebase-aware context using read-only tools.
-5. **🔁 PR Watch** — After shipping, toad monitors for review comments and auto-fixes.
-
-## 👑 Digest (Toad King)
-
-When enabled, the digest engine passively collects all non-bot messages and periodically batch-analyzes them with Haiku to detect one-shot opportunities (clear, specific bugs or tiny features). High-confidence matches are auto-spawned as tadpoles with guardrails:
-
-- Confidence must be >= 0.95
-- Only allowed categories (default: bugs only)
-- Only tiny/small estimated size
-- Rate-limited to N spawns per hour
-
-Enable in config:
-
-```yaml
-digest:
-  enabled: true
-```
-
-## 🏗️ Service-aware validation
-
-For monorepos with multiple services, configure per-service test/lint commands:
-
-```yaml
-repos:
-  - name: my-monorepo
-    path: /path/to/repo
-    services:
-      - path: web-app
-        test_command: make test
-        lint_command: make stan && make cs
-      - path: api
-        test_command: pytest
-        lint_command: ruff check .
-```
-
-When a tadpole changes files, toad matches them to services by path prefix and runs each service's commands from its subdirectory. Unmatched files fall back to root-level commands.
+| Command | Description |
+|---------|-------------|
+| `toad` | Start the daemon |
+| `toad init` | Interactive setup wizard |
+| `toad run "task"` | Spawn a tadpole from the CLI (no Slack needed) |
+| `toad status` | Open live monitoring dashboard in browser |
+| `toad version` | Print version info |
+| `toad update` | Self-update to latest version |
 
 ## 🏛️ Architecture
 
@@ -312,7 +172,7 @@ go test ./internal/state/
 
 ## 📄 License
 
-MIT
+[Elastic License 2.0 (ELv2)](LICENSE) — free to use, modify, and distribute. You may not offer toad as a hosted/managed service.
 
 ---
 
