@@ -364,13 +364,13 @@ func (g *GitLabProvider) AddCommentReaction(ctx context.Context, prNumber, comme
 
 // gitlabEmojiMap translates GitHub reaction content names to GitLab award emoji names.
 var gitlabEmojiMap = map[string]string{
-	"+1":      "thumbsup",
-	"-1":      "thumbsdown",
-	"laugh":   "laughing",
-	"hooray":  "tada",
-	"heart":   "heart",
-	"rocket":  "rocket",
-	"eyes":    "eyes",
+	"+1":       "thumbsup",
+	"-1":       "thumbsdown",
+	"laugh":    "laughing",
+	"hooray":   "tada",
+	"heart":    "heart",
+	"rocket":   "rocket",
+	"eyes":     "eyes",
 	"confused": "confused",
 }
 

@@ -10,7 +10,10 @@ go test ./...               # Run all tests
 go test ./internal/state/   # Run tests for a single package
 go test ./... -run TestFoo  # Run a specific test
 go vet ./...                # Lint
+gofmt -l .                  # Check formatting (must be clean before committing)
 ```
+
+**Before committing:** Always run `gofmt -l .` and fix any output with `gofmt -w <file>`. CI enforces `gofmt` formatting and will fail on unformatted code.
 
 No external test infrastructure needed — tests use in-memory SQLite (`:memory:`) and same-package access to unexported functions.
 
