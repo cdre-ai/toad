@@ -395,6 +395,7 @@ func (w *Watcher) triageComments(ctx context.Context, vcsProvider vcs.Provider, 
 
 	args := []string{
 		"--print",
+		"--dangerously-skip-permissions",
 		"--max-turns", "1",
 		"--output-format", "json",
 		"--model", w.triageModel,
@@ -411,7 +412,15 @@ func (w *Watcher) triageComments(ctx context.Context, vcsProvider vcs.Provider, 
 	var result commentTriage
 	text := extractResultText(output)
 	if err := json.Unmarshal([]byte(text), &result); err != nil {
-		return nil, fmt.Errorf("parsing triage response: %w (raw: %s)", err, string(output))
+		// Claude sometimes wraps JSON in ```json fences — strip and retry
+		stripped := text
+		stripped = strings.TrimPrefix(stripped, "```json")
+		stripped = strings.TrimPrefix(stripped, "```")
+		stripped = strings.TrimSuffix(stripped, "```")
+		stripped = strings.TrimSpace(stripped)
+		if err2 := json.Unmarshal([]byte(stripped), &result); err2 != nil {
+			return nil, fmt.Errorf("parsing triage response: %w (raw: %s)", err, string(output))
+		}
 	}
 
 	// Build the task description from the original comments if actionable
