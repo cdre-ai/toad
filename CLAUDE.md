@@ -2,6 +2,10 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+## Git Policy
+
+**NEVER create git commits directly.** All commits and releases must go through the `/release` skill/command. Do not run `git commit`, `git add`, or `git push` outside of that flow.
+
 ## Build & Test
 
 ```bash
