@@ -36,6 +36,10 @@ type Provider interface {
 	// GetPRComments returns all comments (review + conversation) on a PR.
 	GetPRComments(ctx context.Context, prNumber int, repoPath string) ([]PRComment, error)
 
+	// AddCommentReaction adds an emoji reaction to a PR comment.
+	// source is the comment type ("review" or "issue") for GitHub API routing.
+	AddCommentReaction(ctx context.Context, prNumber, commentID int, source, reaction, repoPath string) error
+
 	// ListBotPRs returns PR numbers authored by bots targeting the given branch.
 	ListBotPRs(ctx context.Context, branch, repoPath string) ([]int, error)
 
@@ -73,9 +77,16 @@ type PRComment struct {
 	ID        int
 	Body      string
 	Path      string // file path for inline review comments; empty for conversation comments
+	Source    string // "review" or "issue" — comment type, used to select reaction API endpoint
 	UserLogin string
 	UserType  string // "User" or "Bot"
 	CreatedAt time.Time
+}
+
+// PRCommentRef is a lightweight reference to a PR comment for reaction tracking.
+type PRCommentRef struct {
+	ID     int
+	Source string // "review" or "issue"
 }
 
 // ProviderConfig holds parameters for creating a VCS provider.

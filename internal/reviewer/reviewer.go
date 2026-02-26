@@ -281,6 +281,15 @@ func (w *Watcher) checkReviewComments(ctx context.Context, vcsProvider vcs.Provi
 		"summary", triage.Summary,
 	)
 
+	// React 👀 to each comment on the PR and collect refs for 👍 on completion
+	var commentRefs []vcs.PRCommentRef
+	for _, c := range newComments {
+		if err := vcsProvider.AddCommentReaction(ctx, watch.PRNumber, c.ID, c.Source, "eyes", watch.RepoPath); err != nil {
+			slog.Debug("failed to react eyes to PR comment", "comment_id", c.ID, "error", err)
+		}
+		commentRefs = append(commentRefs, vcs.PRCommentRef{ID: c.ID, Source: c.Source})
+	}
+
 	task := tadpole.Task{
 		Description:    triage.TaskDescription,
 		Summary:        fmt.Sprintf("fix review comments on %s #%d", vcsProvider.PRNoun(), watch.PRNumber),
@@ -290,6 +299,8 @@ func (w *Watcher) checkReviewComments(ctx context.Context, vcsProvider vcs.Provi
 		SlackThreadTS:  watch.SlackThread,
 		ExistingBranch: watch.Branch,
 		Repo:           config.RepoByPath(w.repos, watch.RepoPath),
+		PRNumber:       watch.PRNumber,
+		CommentRefs:    commentRefs,
 	}
 
 	// Notify in Slack

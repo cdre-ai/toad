@@ -32,6 +32,8 @@ type Task struct {
 	ExistingBranch string             // if set, checkout this branch instead of creating new (review fixes)
 	Repo           *config.RepoConfig // resolved repo for this task (nil falls back to cfg.Repos[0])
 	RepoPaths      map[string]string  // path → name, for cross-repo prompts and scrubbing paths from output
+	PRNumber       int                // PR number that triggered this fix (for comment reactions)
+	CommentRefs    []vcs.PRCommentRef // comments to react 👍 on completion
 }
 
 // ShipCallback is called after a successful PR creation with the PR URL, branch, run ID, and task.
@@ -203,6 +205,13 @@ func (r *Runner) Execute(ctx context.Context, task Task) error {
 			return fail(fmt.Sprintf("pushing fix: %s", err))
 		}
 		prURL = fmt.Sprintf("(pushed to existing %s)", vcsProvider.PRNoun())
+
+		// React 👍 to the PR comments that triggered this fix
+		for _, ref := range task.CommentRefs {
+			if err := vcsProvider.AddCommentReaction(ctx, task.PRNumber, ref.ID, ref.Source, "+1", repo.Path); err != nil {
+				slog.Debug("failed to react to PR comment", "comment_id", ref.ID, "error", err)
+			}
+		}
 	} else {
 		r.updateStatus(task, statusTS, fmt.Sprintf(":rocket: Opening %s...", vcsProvider.PRNoun()))
 

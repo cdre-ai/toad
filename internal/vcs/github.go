@@ -240,10 +240,14 @@ func (g *GitHubProvider) GetPRComments(ctx context.Context, prNumber int, repoPa
 
 	var all []PRComment
 	for _, c := range reviewComments {
-		all = append(all, ghCommentToPRComment(c))
+		pc := ghCommentToPRComment(c)
+		pc.Source = "review"
+		all = append(all, pc)
 	}
 	for _, c := range issueComments {
-		all = append(all, ghCommentToPRComment(c))
+		pc := ghCommentToPRComment(c)
+		pc.Source = "issue"
+		all = append(all, pc)
 	}
 	return all, nil
 }
@@ -277,6 +281,25 @@ func ghCommentToPRComment(c ghComment) PRComment {
 		UserType:  c.User.Type,
 		CreatedAt: t,
 	}
+}
+
+func (g *GitHubProvider) AddCommentReaction(ctx context.Context, prNumber, commentID int, source, reaction, repoPath string) error {
+	// GitHub has separate reaction endpoints for review comments vs issue comments.
+	endpoint := fmt.Sprintf("repos/{owner}/{repo}/issues/comments/%d/reactions", commentID)
+	if source == "review" {
+		endpoint = fmt.Sprintf("repos/{owner}/{repo}/pulls/comments/%d/reactions", commentID)
+	}
+
+	cmd := exec.CommandContext(ctx, "gh", "api", "--method", "POST",
+		endpoint, "-f", "content="+reaction, "--silent")
+	cmd.Dir = repoPath
+
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+	if err := cmd.Run(); err != nil {
+		return fmt.Errorf("%w: %s", err, strings.TrimSpace(stderr.String()))
+	}
+	return nil
 }
 
 // ghBotPR represents a PR from `gh pr list --json`.

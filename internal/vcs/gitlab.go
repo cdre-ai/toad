@@ -333,12 +333,45 @@ func (g *GitLabProvider) GetPRComments(ctx context.Context, prNumber int, repoPa
 			ID:        n.ID,
 			Body:      n.Body,
 			Path:      path,
+			Source:    "note",
 			UserLogin: n.Author.Username,
 			UserType:  userType,
 			CreatedAt: t,
 		})
 	}
 	return comments, nil
+}
+
+func (g *GitLabProvider) AddCommentReaction(ctx context.Context, prNumber, commentID int, _, reaction, repoPath string) error {
+	// GitLab award emojis use different names than GitHub reactions.
+	if name, ok := gitlabEmojiMap[reaction]; ok {
+		reaction = name
+	}
+
+	cmd := g.glabCmd(ctx, repoPath,
+		"api", "--method", "POST",
+		fmt.Sprintf("projects/:fullpath/merge_requests/%d/notes/%d/award_emojis", prNumber, commentID),
+		"-f", "name="+reaction,
+	)
+
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+	if err := cmd.Run(); err != nil {
+		return fmt.Errorf("%w: %s", err, strings.TrimSpace(stderr.String()))
+	}
+	return nil
+}
+
+// gitlabEmojiMap translates GitHub reaction content names to GitLab award emoji names.
+var gitlabEmojiMap = map[string]string{
+	"+1":      "thumbsup",
+	"-1":      "thumbsdown",
+	"laugh":   "laughing",
+	"hooray":  "tada",
+	"heart":   "heart",
+	"rocket":  "rocket",
+	"eyes":    "eyes",
+	"confused": "confused",
 }
 
 // isBotUsername checks if a username matches any of the configured bot usernames.
