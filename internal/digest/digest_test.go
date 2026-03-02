@@ -527,6 +527,14 @@ func (f *fakeTracker) ShouldCreateIssues() bool {
 	return f.createIssues
 }
 
+func (f *fakeTracker) GetIssueStatus(_ context.Context, _ *issuetracker.IssueRef) (*issuetracker.IssueStatus, error) {
+	return nil, nil
+}
+
+func (f *fakeTracker) PostComment(_ context.Context, _ *issuetracker.IssueRef, _ string) error {
+	return nil
+}
+
 func TestProcessOpportunities_TrackerExtractsRef(t *testing.T) {
 	cfg := &config.DigestConfig{
 		MinConfidence:     0.5,

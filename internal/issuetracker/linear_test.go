@@ -472,6 +472,315 @@ func TestCreateIssue_CreationFailed(t *testing.T) {
 	}
 }
 
+// --- GetIssueStatus tests ---
+
+func TestGetIssueStatus_Assigned(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		json.NewEncoder(w).Encode(map[string]any{
+			"data": map[string]any{
+				"issues": map[string]any{
+					"nodes": []map[string]any{
+						{
+							"id":        "uuid-123",
+							"state":     map[string]any{"name": "In Progress"},
+							"assignee":  map[string]any{"displayName": "Jane Doe"},
+							"updatedAt": "2026-03-01T12:00:00Z",
+						},
+					},
+				},
+			},
+		})
+	}))
+	defer srv.Close()
+
+	lt := &LinearTracker{
+		apiToken:   "token",
+		httpClient: &http.Client{Transport: &rewriteTransport{url: srv.URL}},
+	}
+
+	status, err := lt.GetIssueStatus(context.Background(), &IssueRef{ID: "PLF-1"})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if status == nil {
+		t.Fatal("expected non-nil status")
+	}
+	if status.State != "In Progress" {
+		t.Errorf("expected state 'In Progress', got %q", status.State)
+	}
+	if status.AssigneeName != "Jane Doe" {
+		t.Errorf("expected assignee 'Jane Doe', got %q", status.AssigneeName)
+	}
+	if status.InternalID != "uuid-123" {
+		t.Errorf("expected internal ID 'uuid-123', got %q", status.InternalID)
+	}
+}
+
+func TestGetIssueStatus_Unassigned(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		json.NewEncoder(w).Encode(map[string]any{
+			"data": map[string]any{
+				"issues": map[string]any{
+					"nodes": []map[string]any{
+						{
+							"id":        "uuid-456",
+							"state":     map[string]any{"name": "Todo"},
+							"assignee":  nil,
+							"updatedAt": "2026-03-01T12:00:00Z",
+						},
+					},
+				},
+			},
+		})
+	}))
+	defer srv.Close()
+
+	lt := &LinearTracker{
+		apiToken:   "token",
+		httpClient: &http.Client{Transport: &rewriteTransport{url: srv.URL}},
+	}
+
+	status, err := lt.GetIssueStatus(context.Background(), &IssueRef{ID: "PLF-2"})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if status == nil {
+		t.Fatal("expected non-nil status")
+	}
+	if status.AssigneeName != "" {
+		t.Errorf("expected empty assignee, got %q", status.AssigneeName)
+	}
+}
+
+func TestGetIssueStatus_NotFound(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		json.NewEncoder(w).Encode(map[string]any{
+			"data": map[string]any{
+				"issues": map[string]any{
+					"nodes": []map[string]any{},
+				},
+			},
+		})
+	}))
+	defer srv.Close()
+
+	lt := &LinearTracker{
+		apiToken:   "token",
+		httpClient: &http.Client{Transport: &rewriteTransport{url: srv.URL}},
+	}
+
+	status, err := lt.GetIssueStatus(context.Background(), &IssueRef{ID: "PLF-999"})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if status != nil {
+		t.Error("expected nil status for non-existent issue")
+	}
+}
+
+func TestGetIssueStatus_NoToken(t *testing.T) {
+	lt := &LinearTracker{}
+	status, err := lt.GetIssueStatus(context.Background(), &IssueRef{ID: "PLF-1"})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if status != nil {
+		t.Error("expected nil status when no token configured")
+	}
+}
+
+// --- PostComment tests ---
+
+func TestPostComment_Success(t *testing.T) {
+	callCount := 0
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		callCount++
+		var payload struct {
+			Query string `json:"query"`
+		}
+		json.NewDecoder(r.Body).Decode(&payload)
+
+		if strings.Contains(payload.Query, "issues(") {
+			// GetIssueStatus call (to resolve internal ID)
+			json.NewEncoder(w).Encode(map[string]any{
+				"data": map[string]any{
+					"issues": map[string]any{
+						"nodes": []map[string]any{
+							{
+								"id":        "uuid-resolved",
+								"state":     map[string]any{"name": "Todo"},
+								"assignee":  nil,
+								"updatedAt": "2026-03-01T12:00:00Z",
+							},
+						},
+					},
+				},
+			})
+		} else if strings.Contains(payload.Query, "commentCreate") {
+			// PostComment call
+			json.NewEncoder(w).Encode(map[string]any{
+				"data": map[string]any{
+					"commentCreate": map[string]any{
+						"success": true,
+					},
+				},
+			})
+		}
+	}))
+	defer srv.Close()
+
+	lt := &LinearTracker{
+		apiToken:   "token",
+		httpClient: &http.Client{Transport: &rewriteTransport{url: srv.URL}},
+	}
+
+	err := lt.PostComment(context.Background(), &IssueRef{ID: "PLF-1"}, "Test comment")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if callCount != 2 {
+		t.Errorf("expected 2 API calls (status + comment), got %d", callCount)
+	}
+}
+
+func TestPostComment_IssueNotFound(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		json.NewEncoder(w).Encode(map[string]any{
+			"data": map[string]any{
+				"issues": map[string]any{
+					"nodes": []map[string]any{},
+				},
+			},
+		})
+	}))
+	defer srv.Close()
+
+	lt := &LinearTracker{
+		apiToken:   "token",
+		httpClient: &http.Client{Transport: &rewriteTransport{url: srv.URL}},
+	}
+
+	err := lt.PostComment(context.Background(), &IssueRef{ID: "PLF-999"}, "Test")
+	if err == nil {
+		t.Fatal("expected error when issue not found")
+	}
+	if !strings.Contains(err.Error(), "not found") {
+		t.Errorf("expected 'not found' error, got %v", err)
+	}
+}
+
+func TestPostComment_PreResolvedInternalID(t *testing.T) {
+	callCount := 0
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		callCount++
+		var payload struct {
+			Query string `json:"query"`
+		}
+		json.NewDecoder(r.Body).Decode(&payload)
+
+		if strings.Contains(payload.Query, "issues(") {
+			t.Error("unexpected GetIssueStatus call — should have used pre-resolved InternalID")
+		}
+		// Only the commentCreate call should happen
+		json.NewEncoder(w).Encode(map[string]any{
+			"data": map[string]any{
+				"commentCreate": map[string]any{"success": true},
+			},
+		})
+	}))
+	defer srv.Close()
+
+	lt := &LinearTracker{
+		apiToken:   "token",
+		httpClient: &http.Client{Transport: &rewriteTransport{url: srv.URL}},
+	}
+
+	err := lt.PostComment(context.Background(), &IssueRef{ID: "PLF-1", InternalID: "uuid-pre-resolved"}, "Test comment")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if callCount != 1 {
+		t.Errorf("expected 1 API call (comment only), got %d", callCount)
+	}
+}
+
+func TestPostComment_NoToken(t *testing.T) {
+	lt := &LinearTracker{}
+	err := lt.PostComment(context.Background(), &IssueRef{ID: "PLF-1"}, "Test")
+	if err == nil {
+		t.Fatal("expected error when no token configured")
+	}
+}
+
+// --- doGraphQL tests ---
+
+func TestDoGraphQL_Success(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("Authorization") != "test-token" {
+			t.Errorf("expected auth header, got %q", r.Header.Get("Authorization"))
+		}
+		json.NewEncoder(w).Encode(map[string]any{
+			"data": map[string]any{"hello": "world"},
+		})
+	}))
+	defer srv.Close()
+
+	lt := &LinearTracker{
+		apiToken:   "test-token",
+		httpClient: &http.Client{Transport: &rewriteTransport{url: srv.URL}},
+	}
+
+	data, err := lt.doGraphQL(context.Background(), "{ hello }", nil)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !strings.Contains(string(data), "world") {
+		t.Errorf("expected data to contain 'world', got %s", string(data))
+	}
+}
+
+func TestDoGraphQL_GraphQLError(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		json.NewEncoder(w).Encode(map[string]any{
+			"errors": []map[string]any{
+				{"message": "Something went wrong"},
+			},
+		})
+	}))
+	defer srv.Close()
+
+	lt := &LinearTracker{
+		apiToken:   "token",
+		httpClient: &http.Client{Transport: &rewriteTransport{url: srv.URL}},
+	}
+
+	_, err := lt.doGraphQL(context.Background(), "{ fail }", nil)
+	if err == nil {
+		t.Fatal("expected error for GraphQL error response")
+	}
+	if !strings.Contains(err.Error(), "Something went wrong") {
+		t.Errorf("expected error message, got %v", err)
+	}
+}
+
+func TestDoGraphQL_Non200(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusUnauthorized)
+		w.Write([]byte("unauthorized"))
+	}))
+	defer srv.Close()
+
+	lt := &LinearTracker{
+		apiToken:   "bad",
+		httpClient: &http.Client{Transport: &rewriteTransport{url: srv.URL}},
+	}
+
+	_, err := lt.doGraphQL(context.Background(), "{ test }", nil)
+	if err == nil {
+		t.Fatal("expected error for non-200 status")
+	}
+}
+
 // rewriteTransport redirects all requests to a test server URL.
 type rewriteTransport struct {
 	base http.RoundTripper

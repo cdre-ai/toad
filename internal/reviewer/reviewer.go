@@ -310,13 +310,16 @@ func (w *Watcher) checkReviewComments(ctx context.Context, vcsProvider vcs.Provi
 		"summary", triage.Summary,
 	)
 
-	// React 👀 to each comment on the PR and collect refs for 👍 on completion
+	// React 👀 to each comment on the PR and collect refs for 👍 on completion.
+	// Skip reactions for pr_review source — GitHub doesn't support reactions on review bodies.
 	var commentRefs []vcs.PRCommentRef
 	for _, c := range newComments {
-		if err := vcsProvider.AddCommentReaction(ctx, watch.PRNumber, c.ID, c.Source, "eyes", watch.RepoPath); err != nil {
-			slog.Debug("failed to react eyes to PR comment", "comment_id", c.ID, "error", err)
+		if c.Source != "pr_review" {
+			if err := vcsProvider.AddCommentReaction(ctx, watch.PRNumber, c.ID, c.Source, "eyes", watch.RepoPath); err != nil {
+				slog.Debug("failed to react eyes to PR comment", "comment_id", c.ID, "error", err)
+			}
+			commentRefs = append(commentRefs, vcs.PRCommentRef{ID: c.ID, Source: c.Source})
 		}
-		commentRefs = append(commentRefs, vcs.PRCommentRef{ID: c.ID, Source: c.Source})
 	}
 
 	reviewDesc := triage.TaskDescription

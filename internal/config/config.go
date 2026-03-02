@@ -94,13 +94,15 @@ type DigestConfig struct {
 }
 
 type IssueTrackerConfig struct {
-	Enabled        bool   `yaml:"enabled"`
-	Provider       string `yaml:"provider"`
-	APIToken       string `yaml:"api_token"`
-	TeamID         string `yaml:"team_id"`
-	CreateIssues   bool   `yaml:"create_issues"`
-	BugLabelID     string `yaml:"bug_label_id"`
-	FeatureLabelID string `yaml:"feature_label_id"`
+	Enabled          bool   `yaml:"enabled"`
+	Provider         string `yaml:"provider"`
+	APIToken         string `yaml:"api_token"`
+	TeamID           string `yaml:"team_id"`
+	CreateIssues     bool   `yaml:"create_issues"`
+	BugLabelID       string `yaml:"bug_label_id"`
+	FeatureLabelID   string `yaml:"feature_label_id"`
+	RespectAssignees bool   `yaml:"respect_assignees"` // defer to ticket assignee instead of spawning
+	StaleDays        int    `yaml:"stale_days"`        // assignments older than this are ignored (default: 7)
 }
 
 type VCSConfig struct {
@@ -158,8 +160,9 @@ func defaults() *Config {
 			InvestigateMaxTurns:    25,
 		},
 		IssueTracker: IssueTrackerConfig{
-			Enabled:  false,
-			Provider: "linear",
+			Enabled:   false,
+			Provider:  "linear",
+			StaleDays: 7,
 		},
 		VCS: VCSConfig{
 			Platform: "github",

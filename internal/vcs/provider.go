@@ -77,7 +77,7 @@ type PRComment struct {
 	ID        int
 	Body      string
 	Path      string // file path for inline review comments; empty for conversation comments
-	Source    string // "review" or "issue" — comment type, used to select reaction API endpoint
+	Source    string // comment type: "review", "issue", "pr_review" (GitHub), "note" (GitLab)
 	UserLogin string
 	UserType  string // "User" or "Bot"
 	CreatedAt time.Time

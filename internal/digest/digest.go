@@ -70,6 +70,9 @@ type UnclaimFunc func(threadTS string)
 // ResolveRepoFunc resolves a repo config from triage hints.
 type ResolveRepoFunc func(triageRepo string, fileHints []string) *config.RepoConfig
 
+// GetPermalinkFunc returns a permanent URL to a Slack message.
+type GetPermalinkFunc func(channel, timestamp string) (string, error)
+
 // chunk is a group of messages to analyze in a single agent call.
 type chunk struct {
 	messages []Message
@@ -87,20 +90,23 @@ type DigestStats struct {
 
 // Engine collects messages and periodically analyzes them for one-shot opportunities.
 type Engine struct {
-	cfg          *config.DigestConfig
-	agent        agent.Provider
-	model        string
-	spawn        SpawnFunc
-	notify       NotifyFunc
-	investigate  InvestigateFunc
-	react        ReactFunc
-	claim        ClaimFunc
-	unclaim      UnclaimFunc
-	resolveRepo  ResolveRepoFunc
-	repoPaths    map[string]string // path → name, for cross-repo prompts and path scrubbing
-	repoProfiles string            // formatted repo profiles for multi-repo prompt, empty for single-repo
-	db           *state.DB
-	tracker      issuetracker.Tracker
+	cfg              *config.DigestConfig
+	agent            agent.Provider
+	model            string
+	spawn            SpawnFunc
+	notify           NotifyFunc
+	investigate      InvestigateFunc
+	react            ReactFunc
+	claim            ClaimFunc
+	unclaim          UnclaimFunc
+	resolveRepo      ResolveRepoFunc
+	repoPaths        map[string]string // path → name, for cross-repo prompts and path scrubbing
+	repoProfiles     string            // formatted repo profiles for multi-repo prompt, empty for single-repo
+	db               *state.DB
+	tracker          issuetracker.Tracker
+	getPermalink     GetPermalinkFunc
+	respectAssignees bool
+	staleDays        int
 
 	mu     sync.Mutex
 	buffer []Message
@@ -118,22 +124,25 @@ type Engine struct {
 }
 
 // New creates a digest engine.
-func New(cfg *config.DigestConfig, agentProvider agent.Provider, triageModel string, spawn SpawnFunc, notify NotifyFunc, investigate InvestigateFunc, react ReactFunc, claim ClaimFunc, unclaim UnclaimFunc, resolveRepo ResolveRepoFunc, repoPaths map[string]string, profiles []config.RepoProfile, db *state.DB, tracker issuetracker.Tracker) *Engine {
+func New(cfg *config.DigestConfig, agentProvider agent.Provider, triageModel string, spawn SpawnFunc, notify NotifyFunc, investigate InvestigateFunc, react ReactFunc, claim ClaimFunc, unclaim UnclaimFunc, resolveRepo ResolveRepoFunc, repoPaths map[string]string, profiles []config.RepoProfile, db *state.DB, tracker issuetracker.Tracker, getPermalink GetPermalinkFunc, respectAssignees bool, staleDays int) *Engine {
 	e := &Engine{
-		cfg:         cfg,
-		agent:       agentProvider,
-		model:       triageModel,
-		spawn:       spawn,
-		notify:      notify,
-		investigate: investigate,
-		claim:       claim,
-		unclaim:     unclaim,
-		react:       react,
-		resolveRepo: resolveRepo,
-		repoPaths:   repoPaths,
-		db:          db,
-		tracker:     tracker,
-		spawnHour:   time.Now().Hour(),
+		cfg:              cfg,
+		agent:            agentProvider,
+		model:            triageModel,
+		spawn:            spawn,
+		notify:           notify,
+		investigate:      investigate,
+		claim:            claim,
+		unclaim:          unclaim,
+		react:            react,
+		resolveRepo:      resolveRepo,
+		repoPaths:        repoPaths,
+		db:               db,
+		tracker:          tracker,
+		getPermalink:     getPermalink,
+		respectAssignees: respectAssignees,
+		staleDays:        staleDays,
+		spawnHour:        time.Now().Hour(),
 	}
 	if len(profiles) > 1 {
 		e.repoProfiles = config.FormatForPrompt(profiles)
@@ -383,6 +392,33 @@ func (e *Engine) processOpportunities(ctx context.Context, msgs []Message, oppor
 				} else {
 					issueRef = ref
 				}
+			}
+		}
+
+		// Ticket assignee gate: if the ticket is actively assigned,
+		// post findings to the ticket instead of spawning.
+		if e.respectAssignees && issueRef != nil {
+			permalink := ""
+			if e.getPermalink != nil {
+				permalink, _ = e.getPermalink(msg.Channel, msg.Timestamp)
+			}
+			gate := issuetracker.CheckAssigneeGate(ctx, e.tracker, issuetracker.GateOpts{
+				IssueRef:       issueRef,
+				StaleDays:      e.staleDays,
+				Findings:       taskDescription + "\n\n**Reasoning:** " + reasoning,
+				SlackPermalink: permalink,
+			})
+			if gate.Gated {
+				if e.notify != nil {
+					e.notify(msg.Channel, threadTS,
+						fmt.Sprintf(":clipboard: %s is assigned to %s — I posted my findings as a comment on the ticket. "+
+							"Say `@toad fix this` if you'd like me to open a PR.",
+							issueRef.ID, gate.Status.AssigneeName))
+				}
+				if e.unclaim != nil {
+					e.unclaim(threadTS)
+				}
+				continue
 			}
 		}
 

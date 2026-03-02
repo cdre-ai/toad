@@ -172,6 +172,8 @@ digest:
 {{ end }}  create_issues: {{ .IssueTracker.CreateIssues }}
   # bug_label_id: ""            # Linear label ID for bugs
   # feature_label_id: ""        # Linear label ID for features
+  # respect_assignees: false    # Defer to ticket assignee instead of spawning
+  # stale_days: 7               # Ignore assignments older than this many days
 {{ else }}# issue_tracker:
 #   enabled: false
 #   provider: "linear"
@@ -180,6 +182,8 @@ digest:
 #   # create_issues: false
 #   # bug_label_id: ""
 #   # feature_label_id: ""
+#   # respect_assignees: false   # Defer to ticket assignee instead of spawning
+#   # stale_days: 7              # Ignore assignments older than this many days
 {{ end }}
 # ──────────────────────────────────────────────
 # VCS Platform

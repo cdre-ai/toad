@@ -99,6 +99,66 @@ func (lt *LinearTracker) ExtractIssueRef(text string) *IssueRef {
 	return nil
 }
 
+// doGraphQL sends a GraphQL request to the Linear API and returns the raw
+// response body. It handles auth headers, status code checks, and GraphQL
+// error extraction.
+func (lt *LinearTracker) doGraphQL(ctx context.Context, query string, variables map[string]any) (json.RawMessage, error) {
+	payload := map[string]any{"query": query}
+	if variables != nil {
+		payload["variables"] = variables
+	}
+
+	body, err := json.Marshal(payload)
+	if err != nil {
+		return nil, fmt.Errorf("marshaling request: %w", err)
+	}
+
+	req, err := http.NewRequestWithContext(ctx, "POST", "https://api.linear.app/graphql", bytes.NewReader(body))
+	if err != nil {
+		return nil, fmt.Errorf("creating request: %w", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", lt.apiToken)
+
+	resp, err := lt.httpClient.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("linear API request: %w", err)
+	}
+	defer resp.Body.Close()
+
+	respBody, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("reading response: %w", err)
+	}
+
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("linear API returned %d: %s", resp.StatusCode, string(respBody))
+	}
+
+	// Check for GraphQL-level errors
+	var gqlResp struct {
+		Data   json.RawMessage `json:"data"`
+		Errors []struct {
+			Message    string         `json:"message"`
+			Extensions map[string]any `json:"extensions"`
+		} `json:"errors"`
+	}
+	if err := json.Unmarshal(respBody, &gqlResp); err != nil {
+		return nil, fmt.Errorf("parsing response: %w", err)
+	}
+
+	if len(gqlResp.Errors) > 0 {
+		e := gqlResp.Errors[0]
+		if len(e.Extensions) > 0 {
+			extJSON, _ := json.Marshal(e.Extensions)
+			return nil, fmt.Errorf("linear API error: %s (details: %s)", e.Message, string(extJSON))
+		}
+		return nil, fmt.Errorf("linear API error: %s", e.Message)
+	}
+
+	return gqlResp.Data, nil
+}
+
 // resolveTeamID resolves a team key (e.g. "PLF") to its UUID via the Linear API.
 // If teamID is already a UUID, this is a no-op.
 func (lt *LinearTracker) resolveTeamID(ctx context.Context) error {
@@ -108,42 +168,24 @@ func (lt *LinearTracker) resolveTeamID(ctx context.Context) error {
 
 	slog.Info("resolving Linear team key to UUID", "key", lt.teamID)
 
-	query := `{ teams { nodes { id key } } }`
-	payload, _ := json.Marshal(map[string]any{"query": query})
-
-	req, err := http.NewRequestWithContext(ctx, "POST", "https://api.linear.app/graphql", bytes.NewReader(payload))
+	data, err := lt.doGraphQL(ctx, `{ teams { nodes { id key } } }`, nil)
 	if err != nil {
-		return fmt.Errorf("creating request: %w", err)
-	}
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Authorization", lt.apiToken)
-
-	resp, err := lt.httpClient.Do(req)
-	if err != nil {
-		return fmt.Errorf("linear API request: %w", err)
-	}
-	defer resp.Body.Close()
-
-	respBody, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return fmt.Errorf("reading response: %w", err)
+		return fmt.Errorf("fetching teams: %w", err)
 	}
 
 	var result struct {
-		Data struct {
-			Teams struct {
-				Nodes []struct {
-					ID  string `json:"id"`
-					Key string `json:"key"`
-				} `json:"nodes"`
-			} `json:"teams"`
-		} `json:"data"`
+		Teams struct {
+			Nodes []struct {
+				ID  string `json:"id"`
+				Key string `json:"key"`
+			} `json:"nodes"`
+		} `json:"teams"`
 	}
-	if err := json.Unmarshal(respBody, &result); err != nil {
+	if err := json.Unmarshal(data, &result); err != nil {
 		return fmt.Errorf("parsing teams response: %w", err)
 	}
 
-	for _, team := range result.Data.Teams.Nodes {
+	for _, team := range result.Teams.Nodes {
 		if team.Key == lt.teamID {
 			slog.Info("resolved Linear team", "key", lt.teamID, "uuid", team.ID)
 			lt.teamID = team.ID
@@ -181,7 +223,6 @@ func (lt *LinearTracker) CreateIssue(ctx context.Context, opts CreateIssueOpts) 
 		}
 	}
 
-	// Build the GraphQL mutation
 	variables := map[string]any{
 		"title":       opts.Title,
 		"description": opts.Description,
@@ -202,77 +243,149 @@ func (lt *LinearTracker) CreateIssue(ctx context.Context, opts CreateIssueOpts) 
 		}
 	}`
 
-	payload := map[string]any{
-		"query":     query,
-		"variables": variables,
-	}
-
-	body, err := json.Marshal(payload)
+	data, err := lt.doGraphQL(ctx, query, variables)
 	if err != nil {
-		return nil, fmt.Errorf("marshaling request: %w", err)
+		return nil, err
 	}
 
-	req, err := http.NewRequestWithContext(ctx, "POST", "https://api.linear.app/graphql", bytes.NewReader(body))
-	if err != nil {
-		return nil, fmt.Errorf("creating request: %w", err)
+	var result struct {
+		IssueCreate struct {
+			Success bool `json:"success"`
+			Issue   struct {
+				Identifier string `json:"identifier"`
+				URL        string `json:"url"`
+				Title      string `json:"title"`
+			} `json:"issue"`
+		} `json:"issueCreate"`
 	}
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Authorization", lt.apiToken)
-
-	resp, err := lt.httpClient.Do(req)
-	if err != nil {
-		return nil, fmt.Errorf("linear API request: %w", err)
-	}
-	defer resp.Body.Close()
-
-	respBody, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return nil, fmt.Errorf("reading response: %w", err)
+	if err := json.Unmarshal(data, &result); err != nil {
+		return nil, fmt.Errorf("parsing issue create response: %w", err)
 	}
 
-	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("linear API returned %d: %s", resp.StatusCode, string(respBody))
-	}
-
-	var gqlResp struct {
-		Data struct {
-			IssueCreate struct {
-				Success bool `json:"success"`
-				Issue   struct {
-					Identifier string `json:"identifier"`
-					URL        string `json:"url"`
-					Title      string `json:"title"`
-				} `json:"issue"`
-			} `json:"issueCreate"`
-		} `json:"data"`
-		Errors []struct {
-			Message    string         `json:"message"`
-			Extensions map[string]any `json:"extensions"`
-		} `json:"errors"`
-	}
-
-	if err := json.Unmarshal(respBody, &gqlResp); err != nil {
-		return nil, fmt.Errorf("parsing response: %w", err)
-	}
-
-	if len(gqlResp.Errors) > 0 {
-		e := gqlResp.Errors[0]
-		if len(e.Extensions) > 0 {
-			extJSON, _ := json.Marshal(e.Extensions)
-			return nil, fmt.Errorf("linear API error: %s (details: %s)", e.Message, string(extJSON))
-		}
-		return nil, fmt.Errorf("linear API error: %s (response: %s)", e.Message, string(respBody))
-	}
-
-	if !gqlResp.Data.IssueCreate.Success {
+	if !result.IssueCreate.Success {
 		return nil, fmt.Errorf("linear issue creation failed")
 	}
 
-	issue := gqlResp.Data.IssueCreate.Issue
+	issue := result.IssueCreate.Issue
 	return &IssueRef{
 		Provider: "linear",
 		ID:       issue.Identifier,
 		URL:      issue.URL,
 		Title:    issue.Title,
 	}, nil
+}
+
+// GetIssueStatus fetches the current status and assignment info for a Linear issue.
+// Uses the issue's updatedAt as a proxy for assignment recency (Linear has no
+// first-class assignedAt field).
+func (lt *LinearTracker) GetIssueStatus(ctx context.Context, ref *IssueRef) (*IssueStatus, error) {
+	if lt.apiToken == "" {
+		return nil, nil
+	}
+
+	query := `query IssueByIdentifier($filter: IssueFilter!) {
+		issues(filter: $filter, first: 1) {
+			nodes {
+				id
+				state { name }
+				assignee { displayName }
+				updatedAt
+			}
+		}
+	}`
+
+	variables := map[string]any{
+		"filter": map[string]any{
+			"identifier": map[string]any{"eq": ref.ID},
+		},
+	}
+
+	data, err := lt.doGraphQL(ctx, query, variables)
+	if err != nil {
+		return nil, fmt.Errorf("fetching issue status: %w", err)
+	}
+
+	var result struct {
+		Issues struct {
+			Nodes []struct {
+				ID    string `json:"id"`
+				State struct {
+					Name string `json:"name"`
+				} `json:"state"`
+				Assignee *struct {
+					DisplayName string `json:"displayName"`
+				} `json:"assignee"`
+				UpdatedAt time.Time `json:"updatedAt"`
+			} `json:"nodes"`
+		} `json:"issues"`
+	}
+	if err := json.Unmarshal(data, &result); err != nil {
+		return nil, fmt.Errorf("parsing issue status: %w", err)
+	}
+
+	if len(result.Issues.Nodes) == 0 {
+		return nil, nil
+	}
+
+	node := result.Issues.Nodes[0]
+	status := &IssueStatus{
+		State:      node.State.Name,
+		InternalID: node.ID,
+		AssignedAt: node.UpdatedAt,
+	}
+	if node.Assignee != nil {
+		status.AssigneeName = node.Assignee.DisplayName
+	}
+	return status, nil
+}
+
+// PostComment posts a comment on a Linear issue.
+// If ref.InternalID is set, the status lookup is skipped.
+func (lt *LinearTracker) PostComment(ctx context.Context, ref *IssueRef, body string) error {
+	if lt.apiToken == "" {
+		return fmt.Errorf("linear API token not configured")
+	}
+
+	issueID := ref.InternalID
+	if issueID == "" {
+		status, err := lt.GetIssueStatus(ctx, ref)
+		if err != nil {
+			return fmt.Errorf("resolving issue for comment: %w", err)
+		}
+		if status == nil || status.InternalID == "" {
+			return fmt.Errorf("issue %s not found", ref.ID)
+		}
+		issueID = status.InternalID
+	}
+
+	query := `mutation CommentCreate($issueId: String!, $body: String!) {
+		commentCreate(input: {issueId: $issueId, body: $body}) {
+			success
+		}
+	}`
+
+	variables := map[string]any{
+		"issueId": issueID,
+		"body":    body,
+	}
+
+	data, err := lt.doGraphQL(ctx, query, variables)
+	if err != nil {
+		return err
+	}
+
+	var result struct {
+		CommentCreate struct {
+			Success bool `json:"success"`
+		} `json:"commentCreate"`
+	}
+	if err := json.Unmarshal(data, &result); err != nil {
+		return fmt.Errorf("parsing comment response: %w", err)
+	}
+
+	if !result.CommentCreate.Success {
+		return fmt.Errorf("linear comment creation failed")
+	}
+
+	return nil
 }

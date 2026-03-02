@@ -218,6 +218,18 @@ type ghComment struct {
 	CreatedAt string `json:"created_at"`
 }
 
+// ghReview represents a pull request review from the GitHub API.
+type ghReview struct {
+	ID    int    `json:"id"`
+	Body  string `json:"body"`
+	State string `json:"state"`
+	User  struct {
+		Login string `json:"login"`
+		Type  string `json:"type"`
+	} `json:"user"`
+	SubmittedAt string `json:"submitted_at"`
+}
+
 func (g *GitHubProvider) GetPRComments(ctx context.Context, prNumber int, repoPath string) ([]PRComment, error) {
 	// Fetch inline review comments
 	reviewComments, reviewErr := g.fetchComments(ctx,
@@ -233,9 +245,15 @@ func (g *GitHubProvider) GetPRComments(ctx context.Context, prNumber int, repoPa
 		slog.Warn("failed to get issue comments", "pr", prNumber, "error", issueErr)
 	}
 
-	// If both fetches failed, return error so caller knows we got nothing
-	if reviewErr != nil && issueErr != nil {
-		return nil, fmt.Errorf("failed to fetch PR comments: reviews: %w; issues: %w", reviewErr, issueErr)
+	// Fetch PR review submissions (captures "changes requested" reviews with body text)
+	prReviews, prReviewErr := g.fetchReviews(ctx, prNumber, repoPath)
+	if prReviewErr != nil {
+		slog.Warn("failed to get PR reviews", "pr", prNumber, "error", prReviewErr)
+	}
+
+	// If all fetches failed, return error so caller knows we got nothing
+	if reviewErr != nil && issueErr != nil && prReviewErr != nil {
+		return nil, fmt.Errorf("failed to fetch PR comments: reviews: %w; issues: %w; pr_reviews: %w", reviewErr, issueErr, prReviewErr)
 	}
 
 	var all []PRComment
@@ -249,7 +267,51 @@ func (g *GitHubProvider) GetPRComments(ctx context.Context, prNumber int, repoPa
 		pc.Source = "issue"
 		all = append(all, pc)
 	}
+	all = append(all, prReviews...)
 	return all, nil
+}
+
+// fetchReviews fetches PR review submissions and returns actionable ones as PRComments.
+// Only includes reviews with state CHANGES_REQUESTED or COMMENTED that have non-empty bodies.
+func (g *GitHubProvider) fetchReviews(ctx context.Context, prNumber int, repoPath string) ([]PRComment, error) {
+	endpoint := fmt.Sprintf("repos/{owner}/{repo}/pulls/%d/reviews", prNumber)
+	cmd := exec.CommandContext(ctx, "gh", "api", endpoint, "--jq", ".")
+	cmd.Dir = repoPath
+
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+
+	if err := cmd.Run(); err != nil {
+		return nil, fmt.Errorf("%w: %s", err, strings.TrimSpace(stderr.String()))
+	}
+
+	var reviews []ghReview
+	if err := json.Unmarshal(stdout.Bytes(), &reviews); err != nil {
+		return nil, fmt.Errorf("parsing reviews: %w", err)
+	}
+
+	var comments []PRComment
+	for _, r := range reviews {
+		body := strings.TrimSpace(r.Body)
+		if body == "" {
+			continue
+		}
+		state := strings.ToUpper(r.State)
+		if state != "CHANGES_REQUESTED" && state != "COMMENTED" {
+			continue
+		}
+		t, _ := time.Parse(time.RFC3339, r.SubmittedAt)
+		comments = append(comments, PRComment{
+			ID:        r.ID,
+			Body:      body,
+			Source:    "pr_review",
+			UserLogin: r.User.Login,
+			UserType:  r.User.Type,
+			CreatedAt: t,
+		})
+	}
+	return comments, nil
 }
 
 func (g *GitHubProvider) fetchComments(ctx context.Context, endpoint, repoPath string) ([]ghComment, error) {

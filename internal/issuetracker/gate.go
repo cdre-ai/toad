@@ -1,0 +1,82 @@
+package issuetracker
+
+import (
+	"context"
+	"fmt"
+	"log/slog"
+)
+
+// GateResult describes the outcome of checking whether a spawn should be gated
+// because the referenced ticket is actively assigned to someone.
+type GateResult struct {
+	Gated  bool         // true if the spawn should be blocked
+	Status *IssueStatus // the fetched status (non-nil only when Gated)
+}
+
+// GateOpts holds the parameters for CheckAssigneeGate.
+type GateOpts struct {
+	IssueRef       *IssueRef
+	StaleDays      int    // assignments older than this are ignored
+	Findings       string // investigation reasoning / task spec
+	SlackPermalink string // link back to the Slack thread
+}
+
+// CheckAssigneeGate checks if an issue is actively assigned and, if so,
+// posts a comment with findings to the ticket.
+//
+// Fails open: if the issue ref is nil, the status fetch fails, or the comment
+// post fails, the spawn proceeds normally. This ensures a Linear API outage
+// never blocks Toad from working.
+func CheckAssigneeGate(ctx context.Context, tracker Tracker, opts GateOpts) *GateResult {
+	if opts.IssueRef == nil {
+		return &GateResult{Gated: false}
+	}
+
+	status, err := tracker.GetIssueStatus(ctx, opts.IssueRef)
+	if err != nil {
+		slog.Warn("issue status check failed, proceeding with spawn",
+			"issue", opts.IssueRef.ID, "error", err)
+		return &GateResult{Gated: false}
+	}
+	if status == nil {
+		return &GateResult{Gated: false}
+	}
+
+	if !status.IsActivelyAssigned(opts.StaleDays) {
+		slog.Debug("issue not actively assigned, proceeding with spawn",
+			"issue", opts.IssueRef.ID, "assignee", status.AssigneeName,
+			"state", status.State)
+		return &GateResult{Gated: false}
+	}
+
+	// Build and post the comment to the ticket
+	body := fmt.Sprintf(
+		"## Toad investigation findings\n\n"+
+			"%s\n\n"+
+			"---\n"+
+			"_Toad detected this issue in Slack but deferred to you since you're assigned._\n"+
+			"_Say `@toad fix this` in the Slack thread to let Toad open a PR._",
+		opts.Findings,
+	)
+	if opts.SlackPermalink != "" {
+		body += fmt.Sprintf("\n_Slack thread: %s_", opts.SlackPermalink)
+	}
+
+	// Pass the already-resolved internal ID to avoid a redundant GetIssueStatus call.
+	ref := *opts.IssueRef
+	ref.InternalID = status.InternalID
+	if err := tracker.PostComment(ctx, &ref, body); err != nil {
+		slog.Warn("failed to post findings comment to ticket, proceeding with spawn",
+			"issue", opts.IssueRef.ID, "error", err)
+		return &GateResult{Gated: false}
+	}
+
+	slog.Info("ticket assignee gate: deferred to assignee",
+		"issue", opts.IssueRef.ID, "assignee", status.AssigneeName,
+		"state", status.State)
+
+	return &GateResult{
+		Gated:  true,
+		Status: status,
+	}
+}

@@ -200,6 +200,11 @@ func runDaemon(cmd *cobra.Command, args []string) error {
 			profiles,
 			stateDB,
 			tracker,
+			func(channel, timestamp string) (string, error) {
+				return slackClient.GetPermalink(channel, timestamp)
+			},
+			cfg.IssueTracker.RespectAssignees,
+			cfg.IssueTracker.StaleDays,
 		)
 	}
 
@@ -562,6 +567,9 @@ func handleTriggered(
 			taskDescription := investigation.TaskSpec
 
 			issueRef := tracker.ExtractIssueRef(taskDescription)
+			if issueRef == nil {
+				issueRef = tracker.ExtractIssueRef(msg.Text)
+			}
 			if issueRef == nil && tracker.ShouldCreateIssues() {
 				ref, err := tracker.CreateIssue(ctx, issuetracker.CreateIssueOpts{
 					Title:       result.Summary,
@@ -572,6 +580,26 @@ func handleTriggered(
 					slog.Warn("failed to create issue", "error", err, "summary", result.Summary)
 				} else {
 					issueRef = ref
+				}
+			}
+
+			// Ticket assignee gate: if the ticket is actively assigned,
+			// post findings to the ticket instead of spawning a tadpole.
+			if cfg.IssueTracker.RespectAssignees && issueRef != nil {
+				permalink, _ := slackClient.GetPermalink(msg.Channel, threadTS)
+				gate := issuetracker.CheckAssigneeGate(ctx, tracker, issuetracker.GateOpts{
+					IssueRef:       issueRef,
+					StaleDays:      cfg.IssueTracker.StaleDays,
+					Findings:       taskDescription + "\n\n**Reasoning:** " + investigation.Reasoning,
+					SlackPermalink: permalink,
+				})
+				if gate.Gated {
+					slackClient.RemoveReaction(msg.Channel, msg.Timestamp, "eyes")
+					slackClient.ReplyInThread(msg.Channel, threadTS,
+						fmt.Sprintf(":clipboard: %s is assigned to %s — I posted my findings as a comment on the ticket. "+
+							"Say `@toad fix this` if you'd like me to open a PR anyway.",
+							issueRef.ID, gate.Status.AssigneeName))
+					return
 				}
 			}
 

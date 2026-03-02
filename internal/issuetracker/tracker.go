@@ -4,16 +4,39 @@ package issuetracker
 import (
 	"context"
 	"strings"
+	"time"
 
 	"github.com/hergen/toad/internal/config"
 )
 
+// IssueStatus represents the current state and assignment of an issue.
+type IssueStatus struct {
+	State        string    // e.g. "In Progress", "Todo", "Done"
+	AssigneeName string    // display name of assignee, empty if unassigned
+	AssignedAt   time.Time // when the issue was last updated (proxy for assignment recency)
+	InternalID   string    // provider's internal UUID (needed for mutations)
+}
+
+// IsActivelyAssigned returns true if the issue has an assignee whose
+// assignment is more recent than the given staleness threshold.
+func (s *IssueStatus) IsActivelyAssigned(staleDays int) bool {
+	if s.AssigneeName == "" {
+		return false
+	}
+	if s.AssignedAt.IsZero() {
+		return false
+	}
+	cutoff := time.Now().AddDate(0, 0, -staleDays)
+	return s.AssignedAt.After(cutoff)
+}
+
 // IssueRef represents a reference to an issue in an external tracker.
 type IssueRef struct {
-	Provider string // "linear", "jira"
-	ID       string // "PLF-3125"
-	URL      string
-	Title    string
+	Provider   string // "linear", "jira"
+	ID         string // "PLF-3125"
+	URL        string
+	Title      string
+	InternalID string // provider's internal UUID, set when already resolved to skip lookups
 }
 
 // BranchPrefix returns a lowercased issue ID suitable for branch naming.
@@ -34,6 +57,13 @@ type Tracker interface {
 	// ShouldCreateIssues reports whether the tracker is configured to
 	// auto-create issues for opportunities that lack an existing reference.
 	ShouldCreateIssues() bool
+
+	// GetIssueStatus fetches the current status and assignment info for an issue.
+	// Returns nil, nil if the provider doesn't support status checks.
+	GetIssueStatus(ctx context.Context, ref *IssueRef) (*IssueStatus, error)
+
+	// PostComment posts a comment on an existing issue.
+	PostComment(ctx context.Context, ref *IssueRef, body string) error
 }
 
 // CreateIssueOpts holds parameters for creating a new issue.
@@ -49,6 +79,8 @@ type NoopTracker struct{}
 func (NoopTracker) ExtractIssueRef(string) *IssueRef                                { return nil }
 func (NoopTracker) CreateIssue(context.Context, CreateIssueOpts) (*IssueRef, error) { return nil, nil }
 func (NoopTracker) ShouldCreateIssues() bool                                        { return false }
+func (NoopTracker) GetIssueStatus(context.Context, *IssueRef) (*IssueStatus, error) { return nil, nil }
+func (NoopTracker) PostComment(context.Context, *IssueRef, string) error            { return nil }
 
 // NewTracker creates a Tracker from config. Returns NoopTracker when disabled.
 func NewTracker(cfg config.IssueTrackerConfig) Tracker {
