@@ -564,6 +564,7 @@ const dashboardHTML = `<!DOCTYPE html>
     --amber: #FFC107;
     --blue: #58a6ff;
     --purple: #bc8cff;
+    --accent: #58a6ff;
   }
   * { margin: 0; padding: 0; box-sizing: border-box; }
   body {
@@ -869,10 +870,12 @@ const dashboardHTML = `<!DOCTYPE html>
 const MAX_VISIBLE = 5;
 let historyExpanded = false;
 let oppsExpanded = false;
+const expandedReasons = new Set();
 let configExpanded = false;
 
 function toggleHistory() { historyExpanded = !historyExpanded; refresh(); }
 function toggleOpps() { oppsExpanded = !oppsExpanded; refresh(); }
+function toggleReason(id) { if (expandedReasons.has(id)) { expandedReasons.delete(id); } else { expandedReasons.add(id); } refresh(); }
 function toggleConfig() {
   configExpanded = !configExpanded;
   const panel = document.getElementById('config-panel');
@@ -1189,12 +1192,10 @@ async function refresh() {
             const full = esc(o.reasoning);
             if (full.length <= 120) {
               reasonTip = '<br><span style="color:var(--dim);font-size:11px">' + full + '</span>';
+            } else if (expandedReasons.has(i)) {
+              reasonTip = '<br><span style="color:var(--dim);font-size:11px">' + full + ' <a href="#" onclick="event.preventDefault();toggleReason(' + i + ')" style="color:var(--accent)">less</a></span>';
             } else {
-              const id = 'reason-' + i;
-              reasonTip = '<br><span style="color:var(--dim);font-size:11px">'
-                + '<span id="' + id + '-short">' + full.substring(0, 120) + '… <a href="#" onclick="event.preventDefault();document.getElementById(\'' + id + '-short\').style.display=\'none\';document.getElementById(\'' + id + '-full\').style.display=\'inline\';" style="color:var(--accent)">more</a></span>'
-                + '<span id="' + id + '-full" style="display:none">' + full + ' <a href="#" onclick="event.preventDefault();document.getElementById(\'' + id + '-full\').style.display=\'none\';document.getElementById(\'' + id + '-short\').style.display=\'inline\';" style="color:var(--accent)">less</a></span>'
-                + '</span>';
+              reasonTip = '<br><span style="color:var(--dim);font-size:11px">' + full.substring(0, 120) + '… <a href="#" onclick="event.preventDefault();toggleReason(' + i + ')" style="color:var(--accent)">more</a></span>';
             }
           }
           ohtml += '<tr' + rowStyle + '><td>' + relTimeAgo(o.created_at, now) + '</td>'
