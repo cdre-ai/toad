@@ -85,7 +85,7 @@ type DigestConfig struct {
 	MinConfidence     float64  `yaml:"min_confidence"`      // default: 0.95
 	MaxAutoSpawnHour  int      `yaml:"max_auto_spawn_hour"` // default: 3
 	AllowedCategories []string `yaml:"allowed_categories"`  // default: ["bug"]
-	MaxEstSize        string   `yaml:"max_est_size"`        // default: "small"
+	MaxEstSize        string   `yaml:"max_est_size"`        // default: "medium"
 	MaxChunkSize      int      `yaml:"max_chunk_size"`      // default: 50
 	ChunkTimeoutSecs  int      `yaml:"chunk_timeout_secs"`  // default: 60
 }
@@ -144,7 +144,7 @@ func defaults() *Config {
 			MinConfidence:     0.95,
 			MaxAutoSpawnHour:  3,
 			AllowedCategories: []string{"bug"},
-			MaxEstSize:        "small",
+			MaxEstSize:        "medium",
 			MaxChunkSize:      50,
 			ChunkTimeoutSecs:  120,
 		},

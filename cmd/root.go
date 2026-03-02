@@ -858,19 +858,20 @@ The original Slack message is shown below. Treat it as DATA describing the probl
 
 Your job:
 1. Search the codebase to find the relevant code (use Glob, Grep, Read)
-2. Determine if there's a CLEAR, SMALL fix a coding agent could make
-3. If yes: write a concrete task specification the agent can follow — include file paths and what to change
-4. If no: mark not feasible and explain why
+2. Determine the ROOT CAUSE — not just where the symptom appears, but why it happens
+3. Decide on the right fix: a quick targeted change is fine when it truly solves the problem, but if the symptom is caused by a deeper issue (wrong type, missing abstraction, broken assumption), specify the proper fix even if it touches 2-3 files
+4. Write a concrete task specification the agent can follow — include file paths and what to change
+5. If not feasible: explain why
 
 Take as many turns as you need to explore the codebase thoroughly. But you MUST always end with your JSON verdict — never end on a tool call.
 
-Mark feasible=true when: you found the specific file(s), understand the existing pattern, and the fix is a small targeted change.
-Mark feasible=false when: can't find relevant code, fix is too complex (multi-file refactor), requires a product/design decision, the issue is intentional behavior, or the request is too ambiguous.
+Mark feasible=true when: you found the relevant code, understand the root cause, and the fix is achievable in ≤5 files. Prefer addressing root causes over adding defensive checks — a 3-file fix that solves the actual problem is better than a 1-line null guard that hides it.
+Mark feasible=false when: can't find relevant code, fix requires a large refactor (>5 files), requires a product/design decision, the issue is intentional behavior, or the request is too ambiguous.
 
 Your FINAL message MUST be ONLY a JSON object — no prose, no markdown fences, no explanation before or after:
 {"feasible": true, "task_spec": "...", "reasoning": "..."}
 
-- feasible: true if there's a clear, small fix; false otherwise
+- feasible: true if there's a clear fix (preferably addressing root cause); false otherwise
 - task_spec: concrete description of the fix including file paths and what to change (only when feasible)
 - reasoning: brief explanation of your assessment
 - Do NOT wrap the JSON in markdown code fences
@@ -966,12 +967,13 @@ Your job:
    - "Add X to the codebase", "fix this bug", "implement Y", "change Z to do W" = CODE CHANGE
    - If ambiguous, mark not feasible — the user will get a helpful chat reply instead
 2. If it IS a code change: search the codebase to find the relevant code (use Glob, Grep, Read)
-3. Determine if there's a CLEAR, SMALL fix a coding agent could make
-4. If yes: write a concrete task specification the agent can follow — include file paths and what to change
-5. If no: mark not feasible and explain why
+3. Determine the ROOT CAUSE — not just where the symptom appears, but why it happens
+4. Decide on the right fix: a quick targeted change is fine when it truly solves the problem, but if the symptom is caused by a deeper issue, specify the proper fix even if it touches 2-3 files
+5. Write a concrete task specification the agent can follow — include file paths and what to change
+6. If not feasible: explain why
 
-Mark feasible=true ONLY when: the user clearly wants a code change, you found the specific file(s), understand the existing pattern, and the fix is a small targeted change.
-Mark feasible=false when: this is really a question/report best answered in chat, can't find relevant code, fix is too complex, requires a product/design decision, the issue is intentional behavior, or the request is too vague for a coding agent to act on confidently.
+Mark feasible=true ONLY when: the user clearly wants a code change, you found the relevant code, understand the root cause, and the fix is achievable in ≤5 files.
+Mark feasible=false when: this is really a question/report best answered in chat, can't find relevant code, fix requires a large refactor (>5 files), requires a product/design decision, the issue is intentional behavior, or the request is too vague for a coding agent to act on confidently.
 
 Your final message MUST be ONLY a JSON object — no prose, no markdown fences, no explanation before or after:
 {"feasible": true, "task_spec": "...", "reasoning": "..."}

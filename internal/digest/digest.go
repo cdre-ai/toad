@@ -452,7 +452,7 @@ Critical rules:
 - What DOES reduce confidence: vague intent, ambiguous requirements, needing a product decision, unclear desired behavior
 - Vague complaints, general discussions, or questions should NEVER be flagged
 - Only "bug" and "feature" categories are allowed
-- Only "tiny" (1-2 lines) or "small" (1 file) estimated sizes
+- Estimated sizes: "tiny" (1-2 lines), "small" (1 file), or "medium" (2-3 files). Prefer smaller estimates, but use "medium" when the root cause clearly spans multiple files.
 - confidence must be >= 0.95 to be considered
 - message_index is 0-based, referring to the message list above
 
@@ -766,6 +766,9 @@ func (e *Engine) passesGuardrails(opp Opportunity) bool {
 		return false
 	}
 	if maxSize == "small" && opp.EstSize != "tiny" && opp.EstSize != "small" {
+		return false
+	}
+	if maxSize == "medium" && opp.EstSize != "tiny" && opp.EstSize != "small" && opp.EstSize != "medium" {
 		return false
 	}
 

@@ -422,6 +422,38 @@ func TestPassesGuardrails_MaxSizeTiny(t *testing.T) {
 	}
 }
 
+func TestPassesGuardrails_MediumAllowed(t *testing.T) {
+	cfg := &config.DigestConfig{
+		MinConfidence:     0.95,
+		AllowedCategories: []string{"bug"},
+		MaxEstSize:        "medium",
+	}
+	e := &Engine{cfg: cfg}
+	opp := Opportunity{Confidence: 0.96, Category: "bug", EstSize: "medium"}
+	if !e.passesGuardrails(opp) {
+		t.Error("expected medium size to pass when max is medium")
+	}
+}
+
+func TestPassesGuardrails_MaxSizeMedium_LargeFiltered(t *testing.T) {
+	cfg := &config.DigestConfig{
+		MinConfidence:     0.95,
+		AllowedCategories: []string{"bug"},
+		MaxEstSize:        "medium",
+	}
+	e := &Engine{cfg: cfg}
+
+	if e.passesGuardrails(Opportunity{Confidence: 0.96, Category: "bug", EstSize: "large"}) {
+		t.Error("expected large to be filtered when max is medium")
+	}
+	if !e.passesGuardrails(Opportunity{Confidence: 0.96, Category: "bug", EstSize: "small"}) {
+		t.Error("expected small to pass when max is medium")
+	}
+	if !e.passesGuardrails(Opportunity{Confidence: 0.96, Category: "bug", EstSize: "tiny"}) {
+		t.Error("expected tiny to pass when max is medium")
+	}
+}
+
 func TestPassesGuardrails_ExactConfidenceThreshold(t *testing.T) {
 	cfg := &config.DigestConfig{
 		MinConfidence:     0.95,

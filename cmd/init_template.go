@@ -163,7 +163,7 @@ digest:
   # min_confidence: 0.95        # Minimum confidence to auto-spawn
   # max_auto_spawn_hour: 3      # Max auto-spawns per hour
   # allowed_categories: ["bug"] # Categories eligible for auto-spawn
-  # max_est_size: "small"       # Maximum estimated fix size
+  # max_est_size: "medium"      # Maximum estimated fix size
 
 # ──────────────────────────────────────────────
 # Issue Tracker
