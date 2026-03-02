@@ -287,8 +287,10 @@ func (w *Watcher) checkReviewComments(ctx context.Context, vcsProvider vcs.Provi
 		return false, fmt.Errorf("updating last comment ID: %w", err)
 	}
 
-	// Use Haiku to triage which comments are actionable code feedback
-	triage, err := w.triageComments(ctx, vcsProvider, watch.PRNumber, newComments)
+	// Use Haiku to triage which comments are actionable code feedback.
+	// Pass all comments so the task description includes full context
+	// (bot comments, older comments) that new human comments may reference.
+	triage, err := w.triageComments(ctx, vcsProvider, watch.PRNumber, newComments, allComments)
 	if err != nil {
 		slog.Warn("failed to triage review comments", "pr", watch.PRNumber, "error", err)
 		return false, nil
@@ -517,10 +519,10 @@ Rules:
 - The summary should describe what code changes are needed (only if actionable)
 - Be conservative — when in doubt, it's actionable`
 
-func (w *Watcher) triageComments(ctx context.Context, vcsProvider vcs.Provider, prNumber int, comments []vcs.PRComment) (*commentTriage, error) {
-	// Format comments for the prompt
+func (w *Watcher) triageComments(ctx context.Context, vcsProvider vcs.Provider, prNumber int, newComments, allComments []vcs.PRComment) (*commentTriage, error) {
+	// Format only new human comments for the triage prompt (trigger decision)
 	var sb strings.Builder
-	for i, c := range comments {
+	for i, c := range newComments {
 		if c.Path != "" {
 			fmt.Fprintf(&sb, "[%d] File: %s\n", i, c.Path)
 		} else {
@@ -557,17 +559,40 @@ func (w *Watcher) triageComments(ctx context.Context, vcsProvider vcs.Provider, 
 		}
 	}
 
-	// Build the task description from the original comments if actionable
+	// Build the task description with full comment context if actionable.
+	// Include all comments (bot + human, old + new) so the tadpole can
+	// understand references like "fix this" that point to bot review comments.
 	if result.Actionable {
 		var task strings.Builder
 		fmt.Fprintf(&task, "Fix review comments on %s #%d.\n\n", vcsProvider.PRNoun(), prNumber)
-		task.WriteString("Review comments to address:\n\n")
-		for _, c := range comments {
+
+		// New human comments to address (the trigger)
+		task.WriteString("## Review comments to address\n\n")
+		for _, c := range newComments {
 			if c.Path != "" {
 				fmt.Fprintf(&task, "File: %s\n", c.Path)
 			}
 			fmt.Fprintf(&task, "@%s: %s\n\n", c.UserLogin, c.Body)
 		}
+
+		// Prior/bot comments for context (if any exist beyond the new ones)
+		if len(allComments) > len(newComments) {
+			task.WriteString("## All PR comments (for context)\n\n")
+			task.WriteString("Comments marked [bot] are from automated review tools. " +
+				"They may contain useful observations but can be overconfident or incorrect. " +
+				"Always prioritize human reviewer comments and use your own judgement.\n\n")
+			for _, c := range allComments {
+				label := ""
+				if c.UserType == "Bot" {
+					label = " [bot]"
+				}
+				if c.Path != "" {
+					fmt.Fprintf(&task, "File: %s\n", c.Path)
+				}
+				fmt.Fprintf(&task, "@%s%s: %s\n\n", c.UserLogin, label, c.Body)
+			}
+		}
+
 		result.TaskDescription = task.String()
 	}
 
