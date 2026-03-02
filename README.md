@@ -120,15 +120,18 @@ cmd/
 internal/
   slack/           Socket Mode client, event routing, dedup
   triage/          Haiku classification
-  ribbit/          Sonnet Q&A with read-only tools
-  tadpole/         Worktree, Claude runner, validation, shipping
+  ribbit/          Q&A with read-only tools
+  tadpole/         Worktree, agent runner, validation, shipping
   state/           In-memory + SQLite state, crash recovery
   reviewer/        PR review + CI watcher, fix tadpole spawning
   digest/          Toad King: batch analysis, investigation, auto-spawn
   config/          YAML config with cascading defaults, multi-repo profiles
-  vcs/             GitHub + GitLab provider abstraction
-  issuetracker/    Linear integration
+  agent/           Coding agent provider abstraction (see PROVIDERS.md)
+  vcs/             VCS provider abstraction (see PROVIDERS.md)
+  issuetracker/    Issue tracker abstraction (see PROVIDERS.md)
 ```
+
+Three packages use a provider/plugin pattern for extensibility. See the `PROVIDERS.md` in each directory for the interface contracts, current implementations, and how to add new ones.
 
 ### Key design decisions
 

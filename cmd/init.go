@@ -104,7 +104,7 @@ type wizardModel struct {
 	customValidation bool // enable test/lint commands
 	testCmdInput     textinput.Model
 	lintCmdInput     textinput.Model
-	claudeModel      int // 0=sonnet, 1=opus, 2=haiku
+	agentModel       int // 0=sonnet, 1=opus, 2=haiku
 	triageModel      int // 0=haiku, 1=sonnet
 	autoSpawn        bool
 	autoMerge        bool
@@ -576,8 +576,8 @@ func (m wizardModel) updateAdvModels(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "left":
 		switch m.advCursor {
 		case 0:
-			if m.claudeModel > 0 {
-				m.claudeModel--
+			if m.agentModel > 0 {
+				m.agentModel--
 			}
 		case 1:
 			if m.triageModel > 0 {
@@ -589,8 +589,8 @@ func (m wizardModel) updateAdvModels(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "right":
 		switch m.advCursor {
 		case 0:
-			if m.claudeModel < 2 {
-				m.claudeModel++
+			if m.agentModel < 2 {
+				m.agentModel++
 			}
 		case 1:
 			if m.triageModel < 1 {
@@ -714,7 +714,7 @@ func (m *wizardModel) writeConfig() error {
 	toadKingModes := []string{"dry-run", "live", "off"}
 	toadKingMode := toadKingModes[m.toadKingCursor]
 
-	claudeModels := []string{"sonnet", "opus", "haiku"}
+	agentModels := []string{"sonnet", "opus", "haiku"}
 	triageModels := []string{"haiku", "sonnet"}
 	logLevels := []string{"debug", "info", "warn", "error"}
 
@@ -757,8 +757,8 @@ func (m *wizardModel) writeConfig() error {
 			Model:     triageModels[m.triageModel],
 			AutoSpawn: m.autoSpawn,
 		},
-		Claude: claudeTemplateData{
-			Model: claudeModels[m.claudeModel],
+		Agent: agentTemplateData{
+			Model: agentModels[m.agentModel],
 		},
 		Digest: digestTemplateData{
 			Enabled: digestEnabled,
@@ -1119,7 +1119,7 @@ func (m wizardModel) viewAdvValidation() string {
 func (m wizardModel) viewAdvModels() string {
 	var b strings.Builder
 
-	claudeModels := []string{"sonnet", "opus", "haiku"}
+	agentModels := []string{"sonnet", "opus", "haiku"}
 	triageModels := []string{"haiku", "sonnet"}
 
 	b.WriteString(tui.TitleStyle.Render("AI Models"))
@@ -1129,8 +1129,8 @@ func (m wizardModel) viewAdvModels() string {
 
 	b.WriteString(m.fieldLabel("Tadpole model", m.advCursor == 0))
 	b.WriteString("  ")
-	for i, model := range claudeModels {
-		if i == m.claudeModel {
+	for i, model := range agentModels {
+		if i == m.agentModel {
 			b.WriteString(tui.SelectedStyle.Render("[" + model + "]"))
 		} else {
 			b.WriteString(tui.DimStyle.Render(" " + model + " "))
@@ -1222,7 +1222,7 @@ func (m wizardModel) viewSummary() string {
 	var b strings.Builder
 
 	toadKingModes := []string{"dry-run", "live", "off"}
-	claudeModels := []string{"sonnet", "opus", "haiku"}
+	agentModels := []string{"sonnet", "opus", "haiku"}
 
 	b.WriteString(tui.TitleStyle.Render("Review & Save"))
 	b.WriteString("\n\n")
@@ -1241,7 +1241,7 @@ func (m wizardModel) viewSummary() string {
 		box.WriteString(m.summaryLine("Validation", "CI only"))
 	}
 	box.WriteString(m.summaryLine("Toad King", toadKingModes[m.toadKingCursor]))
-	box.WriteString(m.summaryLine("Model", claudeModels[m.claudeModel]))
+	box.WriteString(m.summaryLine("Model", agentModels[m.agentModel]))
 
 	// Inner summary box
 	innerBox := lipgloss.NewStyle().

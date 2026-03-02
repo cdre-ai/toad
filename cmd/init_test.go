@@ -39,7 +39,7 @@ func TestRenderConfig(t *testing.T) {
 			MaxRetries:      1,
 		},
 		Triage: triageTemplateData{Model: "haiku", AutoSpawn: false},
-		Claude: claudeTemplateData{Model: "sonnet"},
+		Agent:  agentTemplateData{Model: "sonnet"},
 		Digest: digestTemplateData{Enabled: true, DryRun: true},
 		IssueTracker: issueTrackerTemplateData{
 			Enabled:      true,
@@ -112,7 +112,7 @@ func TestRenderConfig_NoChannels(t *testing.T) {
 		},
 		Limits: limitsTemplateData{MaxConcurrent: 2, MaxTurns: 30, TimeoutMinutes: 10, MaxFilesChanged: 5, MaxRetries: 1},
 		Triage: triageTemplateData{Model: "haiku"},
-		Claude: claudeTemplateData{Model: "sonnet"},
+		Agent:  agentTemplateData{Model: "sonnet"},
 		Digest: digestTemplateData{Enabled: false},
 		Log:    logTemplateData{Level: "info"},
 	}
@@ -146,7 +146,7 @@ func TestRenderConfig_IssueTrackerDisabled(t *testing.T) {
 		},
 		Limits:       limitsTemplateData{MaxConcurrent: 2, MaxTurns: 30, TimeoutMinutes: 10, MaxFilesChanged: 5, MaxRetries: 1},
 		Triage:       triageTemplateData{Model: "haiku"},
-		Claude:       claudeTemplateData{Model: "sonnet"},
+		Agent:        agentTemplateData{Model: "sonnet"},
 		Digest:       digestTemplateData{Enabled: false},
 		IssueTracker: issueTrackerTemplateData{Enabled: false},
 		Log:          logTemplateData{Level: "info"},
@@ -181,7 +181,7 @@ func TestRenderConfig_CommentsPresent(t *testing.T) {
 		},
 		Limits: limitsTemplateData{MaxConcurrent: 2, MaxTurns: 30, TimeoutMinutes: 10, MaxFilesChanged: 5, MaxRetries: 1},
 		Triage: triageTemplateData{Model: "haiku"},
-		Claude: claudeTemplateData{Model: "sonnet"},
+		Agent:  agentTemplateData{Model: "sonnet"},
 		Digest: digestTemplateData{Enabled: true, DryRun: true},
 		Log:    logTemplateData{Level: "info"},
 	}

@@ -7,6 +7,7 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/hergen/toad/internal/agent"
 	"github.com/hergen/toad/internal/config"
 	toadlog "github.com/hergen/toad/internal/log"
 	"github.com/hergen/toad/internal/state"
@@ -18,7 +19,7 @@ var repoFlag string
 var runCmd = &cobra.Command{
 	Use:   "run [task description]",
 	Short: "Run a tadpole to fix an issue (CLI mode, no Slack)",
-	Long:  "Manually spawn a tadpole that creates a worktree, runs Claude Code, validates, and opens a PR.",
+	Long:  "Manually spawn a tadpole that creates a worktree, runs the coding agent, validates, and opens a PR.",
 	Args:  cobra.MinimumNArgs(1),
 	RunE:  runTadpole,
 }
@@ -41,7 +42,11 @@ func runTadpole(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	if err := checkClaude(); err != nil {
+	agentProvider, err := agent.NewProvider(cfg.Agent.Platform)
+	if err != nil {
+		return fmt.Errorf("agent config: %w", err)
+	}
+	if err := agentProvider.Check(); err != nil {
 		return err
 	}
 	vcsResolver, err := buildVCSResolver(cfg)
@@ -59,7 +64,7 @@ func runTadpole(cmd *cobra.Command, args []string) error {
 	fmt.Printf(":frog: Starting tadpole: %s\n\n", taskDesc)
 
 	sm := state.NewManager()
-	runner := tadpole.NewRunner(cfg, nil, sm, vcsResolver)
+	runner := tadpole.NewRunner(cfg, agentProvider, nil, sm, vcsResolver)
 
 	repoPaths := make(map[string]string, len(cfg.Repos))
 	for _, r := range cfg.Repos {

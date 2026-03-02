@@ -49,7 +49,7 @@ func Validate(ctx context.Context, worktreePath string, cfg ValidateConfig) (*Va
 
 	// Get list of changed files — compare against base commit for review fixes,
 	// or against origin/defaultBranch for new tadpoles.
-	// If BaseCommit is set but no longer an ancestor of HEAD (i.e. Claude rebased),
+	// If BaseCommit is set but no longer an ancestor of HEAD (i.e. agent rebased),
 	// fall back to origin/defaultBranch to avoid an inflated diff.
 	var changedFiles []string
 	var err error
@@ -73,12 +73,12 @@ func Validate(ctx context.Context, worktreePath string, cfg ValidateConfig) (*Va
 
 	if result.FilesChanged == 0 {
 		result.Passed = false
-		result.FailReason = "no files were changed — Claude didn't make any modifications"
+		result.FailReason = "no files were changed — agent didn't make any modifications"
 		return result, nil
 	}
 
 	// Skip max-files check when a rebase was detected on a review fix — the diff
-	// against origin/defaultBranch includes the entire PR, not just Claude's changes.
+	// against origin/defaultBranch includes the entire PR, not just the agent's changes.
 	if cfg.MaxFilesChanged > 0 && result.FilesChanged > cfg.MaxFilesChanged && !rebased {
 		result.Passed = false
 		result.FailReason = fmt.Sprintf("too many files changed (%d > max %d)", result.FilesChanged, cfg.MaxFilesChanged)
@@ -224,7 +224,7 @@ func getChangedFiles(ctx context.Context, worktreePath, defaultBranch string) ([
 }
 
 // isAncestor returns true if commit is an ancestor of HEAD in the given worktree.
-// Used to detect whether Claude rebased: if the base commit is no longer an ancestor,
+// Used to detect whether the agent rebased: if the base commit is no longer an ancestor,
 // diffing against it would include upstream changes pulled in by the rebase.
 func isAncestor(ctx context.Context, worktreePath, commit string) bool {
 	cmd := exec.CommandContext(ctx, "git", "merge-base", "--is-ancestor", commit, "HEAD")
@@ -233,7 +233,7 @@ func isAncestor(ctx context.Context, worktreePath, commit string) bool {
 }
 
 // getChangedFilesVsCommit returns files that differ from a specific commit hash.
-// Used for review fixes where we want to know what Claude changed on the branch,
+// Used for review fixes where we want to know what the agent changed on the branch,
 // not what the branch differs from main.
 func getChangedFilesVsCommit(ctx context.Context, worktreePath, commit string) ([]string, error) {
 	cmd := exec.CommandContext(ctx, "git", "diff", "--name-only", commit)

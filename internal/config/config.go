@@ -15,10 +15,11 @@ type Config struct {
 	Repos        []RepoConfig       `yaml:"repos"`
 	Limits       LimitsConfig       `yaml:"limits"`
 	Triage       TriageConfig       `yaml:"triage"`
-	Claude       ClaudeConfig       `yaml:"claude"`
+	Claude       ClaudeConfig       `yaml:"claude"` // Deprecated: use Agent.Model and Agent.AppendSystemPrompt
 	Digest       DigestConfig       `yaml:"digest"`
 	IssueTracker IssueTrackerConfig `yaml:"issue_tracker"`
 	VCS          VCSConfig          `yaml:"vcs"`
+	Agent        AgentConfig        `yaml:"agent"`
 	Log          LogConfig          `yaml:"log"`
 }
 
@@ -106,6 +107,12 @@ type VCSConfig struct {
 	BotUsernames []string `yaml:"bot_usernames"` // usernames to treat as bots (GitLab)
 }
 
+type AgentConfig struct {
+	Platform           string `yaml:"platform"`             // "claude" (default)
+	Model              string `yaml:"model"`                // default: "sonnet"
+	AppendSystemPrompt string `yaml:"append_system_prompt"` // extra instructions for all agent runs
+}
+
 type LogConfig struct {
 	Level string `yaml:"level"`
 	File  string `yaml:"file"`
@@ -135,9 +142,7 @@ func defaults() *Config {
 			Model:     "haiku",
 			AutoSpawn: false,
 		},
-		Claude: ClaudeConfig{
-			Model: "sonnet",
-		},
+		Claude: ClaudeConfig{}, // deprecated, kept for YAML backward compat
 		Digest: DigestConfig{
 			Enabled:           false,
 			BatchMinutes:      5,
@@ -154,6 +159,10 @@ func defaults() *Config {
 		},
 		VCS: VCSConfig{
 			Platform: "github",
+		},
+		Agent: AgentConfig{
+			Platform: "claude",
+			Model:    "sonnet",
 		},
 		Log: LogConfig{
 			Level: "info",
@@ -178,6 +187,16 @@ func Load() (*Config, error) {
 	}
 
 	applyEnv(cfg)
+
+	// Migrate deprecated claude: section to agent: — only apply when the
+	// agent field is still at its default so an explicit agent: block wins.
+	agentDefaults := AgentConfig{Platform: "claude", Model: "sonnet"}
+	if cfg.Claude.Model != "" && cfg.Agent.Model == agentDefaults.Model {
+		cfg.Agent.Model = cfg.Claude.Model
+	}
+	if cfg.Claude.AppendSystemPrompt != "" && cfg.Agent.AppendSystemPrompt == "" {
+		cfg.Agent.AppendSystemPrompt = cfg.Claude.AppendSystemPrompt
+	}
 
 	// Apply defaults and normalize paths for individual repos
 	for i := range cfg.Repos {
@@ -231,6 +250,15 @@ func Validate(cfg *Config) error {
 		return fmt.Errorf("unsupported VCS platform %q — supported: github, gitlab", cfg.VCS.Platform)
 	}
 	cfg.VCS.Platform = strings.ToLower(cfg.VCS.Platform)
+	validAgentPlatforms := map[string]bool{"claude": true}
+	agentPlatform := strings.ToLower(cfg.Agent.Platform)
+	if agentPlatform == "" {
+		agentPlatform = "claude"
+	}
+	if !validAgentPlatforms[agentPlatform] {
+		return fmt.Errorf("unsupported agent platform %q — supported: claude", cfg.Agent.Platform)
+	}
+	cfg.Agent.Platform = agentPlatform
 	if err := ValidateRepos(cfg); err != nil {
 		return err
 	}

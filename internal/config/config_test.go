@@ -37,8 +37,8 @@ func TestDefaults(t *testing.T) {
 	if cfg.Triage.Model != "haiku" {
 		t.Errorf("default triage model should be 'haiku', got %q", cfg.Triage.Model)
 	}
-	if cfg.Claude.Model != "sonnet" {
-		t.Errorf("default claude model should be 'sonnet', got %q", cfg.Claude.Model)
+	if cfg.Agent.Model != "sonnet" {
+		t.Errorf("default agent model should be 'sonnet', got %q", cfg.Agent.Model)
 	}
 	if cfg.Log.Level != "info" {
 		t.Errorf("default log level should be 'info', got %q", cfg.Log.Level)
@@ -242,6 +242,55 @@ func TestValidate_UnsupportedGlobalVCSPlatform(t *testing.T) {
 	cfg.VCS.Platform = "bitbucket"
 	if err := Validate(cfg); err == nil {
 		t.Error("expected error for unsupported global VCS platform")
+	}
+}
+
+func TestMigrateClaudeToAgent_OnlyClaude(t *testing.T) {
+	cfg := defaults()
+	cfg.Claude.Model = "opus"
+	cfg.Claude.AppendSystemPrompt = "be concise"
+	// Agent stays at defaults — migration should apply
+	cfg.Agent.Model = "sonnet"
+	cfg.Agent.AppendSystemPrompt = ""
+
+	// Simulate the migration logic from Load()
+	agentDefaults := AgentConfig{Platform: "claude", Model: "sonnet"}
+	if cfg.Claude.Model != "" && cfg.Agent.Model == agentDefaults.Model {
+		cfg.Agent.Model = cfg.Claude.Model
+	}
+	if cfg.Claude.AppendSystemPrompt != "" && cfg.Agent.AppendSystemPrompt == "" {
+		cfg.Agent.AppendSystemPrompt = cfg.Claude.AppendSystemPrompt
+	}
+
+	if cfg.Agent.Model != "opus" {
+		t.Errorf("expected agent model migrated to 'opus', got %q", cfg.Agent.Model)
+	}
+	if cfg.Agent.AppendSystemPrompt != "be concise" {
+		t.Errorf("expected agent system prompt migrated, got %q", cfg.Agent.AppendSystemPrompt)
+	}
+}
+
+func TestMigrateClaudeToAgent_AgentWins(t *testing.T) {
+	cfg := defaults()
+	cfg.Claude.Model = "opus"
+	cfg.Claude.AppendSystemPrompt = "old prompt"
+	// Agent explicitly set — should NOT be overwritten by claude section
+	cfg.Agent.Model = "haiku"
+	cfg.Agent.AppendSystemPrompt = "new prompt"
+
+	agentDefaults := AgentConfig{Platform: "claude", Model: "sonnet"}
+	if cfg.Claude.Model != "" && cfg.Agent.Model == agentDefaults.Model {
+		cfg.Agent.Model = cfg.Claude.Model
+	}
+	if cfg.Claude.AppendSystemPrompt != "" && cfg.Agent.AppendSystemPrompt == "" {
+		cfg.Agent.AppendSystemPrompt = cfg.Claude.AppendSystemPrompt
+	}
+
+	if cfg.Agent.Model != "haiku" {
+		t.Errorf("expected agent model to stay 'haiku', got %q", cfg.Agent.Model)
+	}
+	if cfg.Agent.AppendSystemPrompt != "new prompt" {
+		t.Errorf("expected agent system prompt to stay 'new prompt', got %q", cfg.Agent.AppendSystemPrompt)
 	}
 }
 

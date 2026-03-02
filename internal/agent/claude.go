@@ -1,0 +1,172 @@
+package agent
+
+import (
+	"bytes"
+	"context"
+	"encoding/json"
+	"fmt"
+	"log/slog"
+	"os/exec"
+	"strings"
+	"time"
+)
+
+// ClaudeProvider implements Provider using the Claude Code CLI.
+type ClaudeProvider struct{}
+
+func (c *ClaudeProvider) Check() error {
+	_, err := exec.LookPath("claude")
+	if err != nil {
+		return fmt.Errorf("claude CLI not found in PATH — install it first: https://docs.anthropic.com/en/docs/claude-code")
+	}
+	return nil
+}
+
+func (c *ClaudeProvider) Run(ctx context.Context, opts RunOpts) (*RunResult, error) {
+	args := buildArgs(opts)
+
+	callCtx := ctx
+	var cancel context.CancelFunc
+	if opts.Timeout > 0 {
+		callCtx, cancel = context.WithTimeout(ctx, opts.Timeout)
+		defer cancel()
+	}
+
+	slog.Info("running claude",
+		"model", opts.Model,
+		"max_turns", opts.MaxTurns,
+		"permissions", opts.Permissions,
+		"workdir", opts.WorkDir,
+	)
+
+	start := time.Now()
+
+	cmd := exec.CommandContext(callCtx, "claude", args...)
+	if opts.WorkDir != "" {
+		cmd.Dir = opts.WorkDir
+	}
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+
+	err := cmd.Run()
+	duration := time.Since(start)
+
+	if err != nil {
+		if callCtx.Err() == context.DeadlineExceeded {
+			return nil, fmt.Errorf("claude timed out after %s", opts.Timeout)
+		}
+		return nil, fmt.Errorf("claude failed: %w: %s", err, strings.TrimSpace(stderr.String()))
+	}
+
+	output := stdout.Bytes()
+	slog.Debug("claude raw output", "len", len(output), "duration", duration)
+
+	result, err := parseEnvelope(output)
+	if err != nil {
+		return nil, err
+	}
+	result.Duration = duration
+	return result, nil
+}
+
+func (c *ClaudeProvider) Resume(ctx context.Context, sessionID, prompt, workDir string) (*RunResult, error) {
+	args := []string{
+		"--print",
+		"--resume", sessionID,
+		"--max-turns", "1",
+		"--output-format", "json",
+		"-p", prompt,
+	}
+
+	start := time.Now()
+
+	cmd := exec.CommandContext(ctx, "claude", args...)
+	if workDir != "" {
+		cmd.Dir = workDir
+	}
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+
+	err := cmd.Run()
+	duration := time.Since(start)
+
+	if err != nil {
+		return nil, fmt.Errorf("claude resume call failed: %w: %s", err, strings.TrimSpace(stderr.String()))
+	}
+
+	slog.Debug("claude resume raw output", "len", len(stdout.Bytes()), "duration", duration)
+
+	result, err := parseEnvelope(stdout.Bytes())
+	if err != nil {
+		return nil, err
+	}
+	result.Duration = duration
+	return result, nil
+}
+
+// buildArgs constructs the Claude CLI argument list from RunOpts.
+func buildArgs(opts RunOpts) []string {
+	args := []string{
+		"--print",
+		"--output-format", "json",
+	}
+
+	if opts.Model != "" {
+		args = append(args, "--model", opts.Model)
+	}
+	if opts.MaxTurns > 0 {
+		args = append(args, "--max-turns", fmt.Sprintf("%d", opts.MaxTurns))
+	}
+
+	switch opts.Permissions {
+	case PermissionFull:
+		args = append(args, "--dangerously-skip-permissions")
+	case PermissionReadOnly:
+		args = append(args, "--allowedTools", "Read,Glob,Grep")
+	}
+
+	for _, dir := range opts.AdditionalDirs {
+		args = append(args, "--add-dir", dir)
+	}
+
+	if opts.AppendSystemPrompt != "" {
+		args = append(args, "--append-system-prompt", opts.AppendSystemPrompt)
+	}
+
+	// -p must be last
+	args = append(args, "-p", opts.Prompt)
+	return args
+}
+
+// claudeEnvelope is the JSON structure returned by `claude --output-format json`.
+type claudeEnvelope struct {
+	Result    string  `json:"result"`
+	IsError   bool    `json:"is_error"`
+	SessionID string  `json:"session_id"`
+	CostUSD   float64 `json:"total_cost_usd"`
+	Subtype   string  `json:"subtype"`
+}
+
+// parseEnvelope parses Claude's JSON output envelope into a RunResult.
+func parseEnvelope(output []byte) (*RunResult, error) {
+	var env claudeEnvelope
+	if err := json.Unmarshal(output, &env); err != nil {
+		// Fall back to raw text if envelope parsing fails.
+		return &RunResult{
+			Result: strings.TrimSpace(string(output)),
+		}, nil
+	}
+
+	if env.IsError {
+		return nil, fmt.Errorf("claude returned error: %s", env.Result)
+	}
+
+	return &RunResult{
+		Result:      env.Result,
+		SessionID:   env.SessionID,
+		CostUSD:     env.CostUSD,
+		HitMaxTurns: env.Subtype == "error_max_turns",
+	}, nil
+}

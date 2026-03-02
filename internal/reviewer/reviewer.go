@@ -2,15 +2,14 @@
 package reviewer
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
 	"log/slog"
-	"os/exec"
 	"strings"
 	"time"
 
+	"github.com/hergen/toad/internal/agent"
 	"github.com/hergen/toad/internal/config"
 	islack "github.com/hergen/toad/internal/slack"
 	"github.com/hergen/toad/internal/state"
@@ -27,6 +26,7 @@ type Watcher struct {
 	repos           []config.RepoConfig
 	spawn           SpawnFunc
 	slack           *islack.Client
+	agent           agent.Provider
 	vcs             vcs.Resolver
 	interval        time.Duration
 	maxReviewRounds int
@@ -36,7 +36,7 @@ type Watcher struct {
 }
 
 // NewWatcher creates a PR review watcher.
-func NewWatcher(db *state.DB, repos []config.RepoConfig, spawn SpawnFunc, slack *islack.Client, maxReviewRounds, maxCIFixRounds int, triageModel string, vcsResolver vcs.Resolver) *Watcher {
+func NewWatcher(db *state.DB, repos []config.RepoConfig, spawn SpawnFunc, slack *islack.Client, agentProvider agent.Provider, maxReviewRounds, maxCIFixRounds int, triageModel string, vcsResolver vcs.Resolver) *Watcher {
 	if maxReviewRounds <= 0 {
 		maxReviewRounds = 3
 	}
@@ -48,6 +48,7 @@ func NewWatcher(db *state.DB, repos []config.RepoConfig, spawn SpawnFunc, slack 
 		repos:           repos,
 		spawn:           spawn,
 		slack:           slack,
+		agent:           agentProvider,
 		vcs:             vcsResolver,
 		interval:        2 * time.Minute,
 		maxReviewRounds: maxReviewRounds,
@@ -527,37 +528,29 @@ func (w *Watcher) triageComments(ctx context.Context, vcsProvider vcs.Provider, 
 
 	prompt := fmt.Sprintf(commentTriagePrompt, vcsProvider.PRNoun(), prNumber, sb.String())
 
-	triageCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
-	defer cancel()
-
-	args := []string{
-		"--print",
-		"--max-turns", "1",
-		"--output-format", "json",
-		"--model", w.triageModel,
-		"-p", prompt,
-	}
-
-	cmd := exec.CommandContext(triageCtx, "claude", args...)
-	var stderr bytes.Buffer
-	cmd.Stderr = &stderr
-	output, err := cmd.Output()
+	runResult, err := w.agent.Run(ctx, agent.RunOpts{
+		Prompt:      prompt,
+		Model:       w.triageModel,
+		MaxTurns:    1,
+		Timeout:     30 * time.Second,
+		Permissions: agent.PermissionNone,
+	})
 	if err != nil {
-		return nil, fmt.Errorf("claude triage call failed: %w (stderr: %s)", err, stderr.String())
+		return nil, fmt.Errorf("comment triage call failed: %w", err)
 	}
 
-	// Parse the JSON response — handle --output-format json wrapper
+	// Parse the JSON response
 	var result commentTriage
-	text := extractResultText(output)
+	text := runResult.Result
 	if err := json.Unmarshal([]byte(text), &result); err != nil {
-		// Claude sometimes wraps JSON in ```json fences — strip and retry
+		// Agent sometimes wraps JSON in ```json fences — strip and retry
 		stripped := text
 		stripped = strings.TrimPrefix(stripped, "```json")
 		stripped = strings.TrimPrefix(stripped, "```")
 		stripped = strings.TrimSuffix(stripped, "```")
 		stripped = strings.TrimSpace(stripped)
 		if err2 := json.Unmarshal([]byte(stripped), &result); err2 != nil {
-			return nil, fmt.Errorf("parsing triage response: %w (raw: %s)", err, string(output))
+			return nil, fmt.Errorf("parsing triage response: %w (raw: %s)", err, text)
 		}
 	}
 
@@ -576,15 +569,4 @@ func (w *Watcher) triageComments(ctx context.Context, vcsProvider vcs.Provider, 
 	}
 
 	return &result, nil
-}
-
-// extractResultText extracts the text content from claude --output-format json response.
-func extractResultText(output []byte) string {
-	var resp struct {
-		Result string `json:"result"`
-	}
-	if err := json.Unmarshal(output, &resp); err == nil && resp.Result != "" {
-		return resp.Result
-	}
-	return strings.TrimSpace(string(output))
 }

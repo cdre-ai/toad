@@ -37,7 +37,7 @@ repos:
 
 limits:
   max_concurrent: 2            # Max parallel tadpoles
-  max_turns: 30                # Claude Code max turns per tadpole
+  max_turns: 30                # Max agent turns per tadpole
   timeout_minutes: 10          # Kill tadpole after this
   max_files_changed: 5         # Abort if too many files touched
   max_retries: 1               # Test/lint failure retries
@@ -46,9 +46,10 @@ triage:
   model: "haiku"               # Fast classification (~1s)
   auto_spawn: false            # Require explicit 🐸 trigger for code changes
 
-claude:
+agent:
+  platform: "claude"           # Agent backend ("claude" is the only supported platform)
   model: "sonnet"              # Model for tadpole code runs
-  # append_system_prompt: ""   # Extra instructions for all tadpole runs
+  # append_system_prompt: ""   # Extra instructions for all agent runs
 
 digest:
   enabled: false               # Opt-in batch analysis (Toad King)
@@ -57,7 +58,7 @@ digest:
   min_confidence: 0.95
   max_auto_spawn_hour: 3
   allowed_categories: ["bug"]
-  max_est_size: "small"
+  max_est_size: "medium"
 
 issue_tracker:
   enabled: false               # Enable issue tracker integration

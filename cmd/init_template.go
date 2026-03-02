@@ -14,7 +14,7 @@ type templateData struct {
 	Repos        []repoTemplateData
 	Limits       limitsTemplateData
 	Triage       triageTemplateData
-	Claude       claudeTemplateData
+	Agent        agentTemplateData
 	Digest       digestTemplateData
 	IssueTracker issueTrackerTemplateData
 	Log          logTemplateData
@@ -52,7 +52,7 @@ type triageTemplateData struct {
 	AutoSpawn bool
 }
 
-type claudeTemplateData struct {
+type agentTemplateData struct {
 	Model string
 }
 
@@ -146,13 +146,6 @@ triage:
   auto_spawn: {{ .Triage.AutoSpawn }}
 
 # ──────────────────────────────────────────────
-# Claude — tadpole code generation
-# ──────────────────────────────────────────────
-claude:
-  model: "{{ .Claude.Model }}"
-  # append_system_prompt: ""   # Extra instructions for all tadpole runs
-
-# ──────────────────────────────────────────────
 # Toad King — passive monitoring
 # ──────────────────────────────────────────────
 digest:
@@ -194,6 +187,14 @@ digest:
 #   # host: "gitlab.example.com"  # Self-hosted GitLab hostname (or TOAD_GITLAB_HOST env)
 #   # bot_usernames:              # Usernames to treat as bots (GitLab)
 #   #   - "renovate-bot"
+
+# ──────────────────────────────────────────────
+# Agent — code generation
+# ──────────────────────────────────────────────
+agent:
+  platform: "claude"
+  model: "{{ .Agent.Model }}"
+  # append_system_prompt: ""   # Extra instructions for all agent runs
 
 # ──────────────────────────────────────────────
 # Logging

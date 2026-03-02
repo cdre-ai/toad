@@ -20,7 +20,7 @@ type WorktreeResult struct {
 	Path       string // ~/.toad/worktrees/<slug>-<id>
 	Branch     string // toad/<slug>
 	StaleBase  bool   // true if fetch failed and worktree uses potentially outdated code
-	BaseCommit string // HEAD commit before Claude runs — used as diff baseline for review fixes
+	BaseCommit string // HEAD commit before agent runs — used as diff baseline for review fixes
 }
 
 // CreateWorktree creates a git worktree for an isolated tadpole run.
@@ -110,7 +110,7 @@ func CheckoutWorktree(ctx context.Context, repoPath, branch string) (*WorktreeRe
 		}
 	}
 
-	// Capture HEAD before Claude runs — used as diff baseline for validation
+	// Capture HEAD before agent runs — used as diff baseline for validation
 	baseCommit, err := gitOutput(ctx, wtPath, "rev-parse", "HEAD")
 	if err != nil {
 		slog.Warn("failed to capture base commit", "error", err)

@@ -7,12 +7,12 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
-	"os/exec"
 	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
 
+	"github.com/hergen/toad/internal/agent"
 	"github.com/hergen/toad/internal/config"
 	"github.com/hergen/toad/internal/issuetracker"
 	"github.com/hergen/toad/internal/state"
@@ -70,7 +70,7 @@ type UnclaimFunc func(threadTS string)
 // ResolveRepoFunc resolves a repo config from triage hints.
 type ResolveRepoFunc func(triageRepo string, fileHints []string) *config.RepoConfig
 
-// chunk is a group of messages to analyze in a single Claude call.
+// chunk is a group of messages to analyze in a single agent call.
 type chunk struct {
 	messages []Message
 	label    string // for logging, e.g. "#errors (42 msgs)" or "mixed (12 msgs, 4 channels)"
@@ -88,6 +88,7 @@ type DigestStats struct {
 // Engine collects messages and periodically analyzes them for one-shot opportunities.
 type Engine struct {
 	cfg          *config.DigestConfig
+	agent        agent.Provider
 	model        string
 	spawn        SpawnFunc
 	notify       NotifyFunc
@@ -117,9 +118,10 @@ type Engine struct {
 }
 
 // New creates a digest engine.
-func New(cfg *config.DigestConfig, triageModel string, spawn SpawnFunc, notify NotifyFunc, investigate InvestigateFunc, react ReactFunc, claim ClaimFunc, unclaim UnclaimFunc, resolveRepo ResolveRepoFunc, repoPaths map[string]string, profiles []config.RepoProfile, db *state.DB, tracker issuetracker.Tracker) *Engine {
+func New(cfg *config.DigestConfig, agentProvider agent.Provider, triageModel string, spawn SpawnFunc, notify NotifyFunc, investigate InvestigateFunc, react ReactFunc, claim ClaimFunc, unclaim UnclaimFunc, resolveRepo ResolveRepoFunc, repoPaths map[string]string, profiles []config.RepoProfile, db *state.DB, tracker issuetracker.Tracker) *Engine {
 	e := &Engine{
 		cfg:         cfg,
+		agent:       agentProvider,
 		model:       triageModel,
 		spawn:       spawn,
 		notify:      notify,
@@ -515,36 +517,19 @@ func (e *Engine) analyze(ctx context.Context, msgs []Message) ([]Opportunity, er
 
 	prompt := fmt.Sprintf(digestPrompt, sb.String(), repoSection, repoField)
 
-	args := []string{
-		"--print",
-		"--max-turns", "1",
-		"--output-format", "json",
-		"--model", e.model,
-		"-p", prompt,
-	}
-
-	cmd := exec.CommandContext(ctx, "claude", args...)
-	output, err := cmd.Output()
+	result, err := e.agent.Run(ctx, agent.RunOpts{
+		Prompt:      prompt,
+		Model:       e.model,
+		MaxTurns:    1,
+		Permissions: agent.PermissionNone,
+	})
 	if err != nil {
-		return nil, fmt.Errorf("claude digest call failed: %w", err)
+		return nil, fmt.Errorf("digest analysis failed: %w", err)
 	}
 
-	slog.Debug("digest raw response", "output", string(output))
+	slog.Debug("digest raw response", "output", result.Result)
 
-	// Parse JSON envelope from --output-format json
-	var envelope struct {
-		Result  string `json:"result"`
-		IsError bool   `json:"is_error"`
-	}
-	if err := json.Unmarshal(output, &envelope); err != nil {
-		// Try direct parse
-		return parseOpportunities(output)
-	}
-	if envelope.IsError {
-		return nil, fmt.Errorf("claude digest returned error: %s", envelope.Result)
-	}
-
-	return parseOpportunities([]byte(envelope.Result))
+	return parseOpportunities([]byte(result.Result))
 }
 
 func parseOpportunities(data []byte) ([]Opportunity, error) {

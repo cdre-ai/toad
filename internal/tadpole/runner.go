@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/hergen/toad/internal/agent"
 	"github.com/hergen/toad/internal/config"
 	"github.com/hergen/toad/internal/issuetracker"
 	islack "github.com/hergen/toad/internal/slack"
@@ -42,6 +43,7 @@ type ShipCallback func(prURL, branch, runID string, task Task)
 // Runner orchestrates a single tadpole lifecycle.
 type Runner struct {
 	cfg          *config.Config
+	agent        agent.Provider
 	slack        *islack.Client // nil for CLI-only runs
 	stateManager *state.Manager
 	vcs          vcs.Resolver
@@ -49,8 +51,8 @@ type Runner struct {
 }
 
 // NewRunner creates a tadpole runner.
-func NewRunner(cfg *config.Config, slack *islack.Client, sm *state.Manager, vcsResolver vcs.Resolver) *Runner {
-	return &Runner{cfg: cfg, slack: slack, stateManager: sm, vcs: vcsResolver}
+func NewRunner(cfg *config.Config, agentProvider agent.Provider, slack *islack.Client, sm *state.Manager, vcsResolver vcs.Resolver) *Runner {
+	return &Runner{cfg: cfg, agent: agentProvider, slack: slack, stateManager: sm, vcs: vcsResolver}
 }
 
 // OnShip registers a callback that fires after a successful PR is created.
@@ -66,7 +68,7 @@ func (t *Task) repoConfig(cfg *config.Config) *config.RepoConfig {
 	return &cfg.Repos[0]
 }
 
-// Execute runs the full tadpole lifecycle: worktree → claude → validate → retry → ship.
+// Execute runs the full tadpole lifecycle: worktree → agent → validate → retry → ship.
 func (r *Runner) Execute(ctx context.Context, task Task) error {
 	start := time.Now()
 	hex, err := randomHex(4)
@@ -129,23 +131,24 @@ func (r *Runner) Execute(ctx context.Context, task Task) error {
 		r.updateStatus(task, statusTS, ":warning: Working with potentially outdated code (fetch failed)")
 	}
 
-	// 2. Run Claude
-	r.updateStatus(task, statusTS, ":hammer_and_wrench: Claude is working...")
+	// 2. Run coding agent
+	r.updateStatus(task, statusTS, ":hammer_and_wrench: Coding agent is working...")
 	r.stateManager.Update(runID, "running")
 
 	prompt := buildTadpolePrompt(task, r.cfg.Limits.MaxFilesChanged, task.RepoPaths)
-	claudeOut, err := RunClaude(ctx, ClaudeRunOpts{
-		WorktreePath:       wt.Path,
+	agentOut, err := r.agent.Run(ctx, agent.RunOpts{
 		Prompt:             prompt,
-		Model:              r.cfg.Claude.Model,
+		Model:              r.cfg.Agent.Model,
 		MaxTurns:           r.cfg.Limits.MaxTurns,
-		TimeoutMinutes:     r.cfg.Limits.TimeoutMinutes,
-		AppendSystemPrompt: r.cfg.Claude.AppendSystemPrompt,
+		Timeout:            time.Duration(r.cfg.Limits.TimeoutMinutes) * time.Minute,
+		Permissions:        agent.PermissionFull,
+		WorkDir:            wt.Path,
+		AppendSystemPrompt: r.cfg.Agent.AppendSystemPrompt,
 	})
 	if err != nil {
-		return fail(fmt.Sprintf("claude: %s", err))
+		return fail(fmt.Sprintf("agent: %s", err))
 	}
-	slog.Info("claude completed", "duration", claudeOut.Duration)
+	slog.Info("agent completed", "duration", agentOut.Duration)
 
 	// 3. Validate + retry loop
 	r.updateStatus(task, statusTS, ":mag: Validating changes...")
@@ -157,7 +160,7 @@ func (r *Runner) Execute(ctx context.Context, task Task) error {
 		MaxFilesChanged: r.cfg.Limits.MaxFilesChanged,
 		DefaultBranch:   repo.DefaultBranch,
 		Services:        repo.Services,
-		BaseCommit:      wt.BaseCommit, // non-empty for review fixes, diff against pre-Claude state
+		BaseCommit:      wt.BaseCommit, // non-empty for review fixes, diff against pre-agent state
 	}
 
 	valResult, err := Validate(ctx, wt.Path, valCfg)
@@ -173,16 +176,17 @@ func (r *Runner) Execute(ctx context.Context, task Task) error {
 			fmt.Sprintf(":recycle: Retry %d/%d — %s", attempt+1, r.cfg.Limits.MaxRetries, valResult.FailReason))
 
 		retryPrompt := buildRetryPrompt(valResult)
-		_, err := RunClaude(ctx, ClaudeRunOpts{
-			WorktreePath:       wt.Path,
+		_, err := r.agent.Run(ctx, agent.RunOpts{
 			Prompt:             retryPrompt,
-			Model:              r.cfg.Claude.Model,
+			Model:              r.cfg.Agent.Model,
 			MaxTurns:           r.cfg.Limits.MaxTurns,
-			TimeoutMinutes:     r.cfg.Limits.TimeoutMinutes,
-			AppendSystemPrompt: r.cfg.Claude.AppendSystemPrompt,
+			Timeout:            time.Duration(r.cfg.Limits.TimeoutMinutes) * time.Minute,
+			Permissions:        agent.PermissionFull,
+			WorkDir:            wt.Path,
+			AppendSystemPrompt: r.cfg.Agent.AppendSystemPrompt,
 		})
 		if err != nil {
-			return fail(fmt.Sprintf("retry claude: %s", err))
+			return fail(fmt.Sprintf("retry agent: %s", err))
 		}
 		valResult, err = Validate(ctx, wt.Path, valCfg)
 		if err != nil {
@@ -320,7 +324,7 @@ func (r *Runner) ship(ctx context.Context, vcsProvider vcs.Provider, worktreePat
 	}
 
 	// Verify we have commits ahead of the default branch — catches cases where
-	// Claude's changes are identical to what's already on main after push.
+	// Agent's changes are identical to what's already on main after push.
 	diffCmd := exec.CommandContext(ctx, "git", "log", "origin/"+defaultBranch+"..HEAD", "--oneline")
 	diffCmd.Dir = worktreePath
 	diffOut, err := diffCmd.Output()

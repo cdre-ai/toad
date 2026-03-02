@@ -1,16 +1,15 @@
-// Package triage classifies incoming messages using Claude Haiku.
+// Package triage classifies incoming messages using a fast LLM.
 package triage
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
 	"log/slog"
-	"os/exec"
 	"strings"
 	"time"
 
+	"github.com/hergen/toad/internal/agent"
 	"github.com/hergen/toad/internal/config"
 	islack "github.com/hergen/toad/internal/slack"
 )
@@ -27,15 +26,16 @@ type Result struct {
 	Repo       string   `json:"repo"`
 }
 
-// Engine classifies Slack messages using Claude Haiku.
+// Engine classifies Slack messages using a fast triage model.
 type Engine struct {
+	agent        agent.Provider
 	model        string
 	repoProfiles string // formatted repo profiles for multi-repo prompt, empty for single-repo
 }
 
 // New creates a triage engine with the configured model.
-func New(cfg *config.Config, profiles []config.RepoProfile) *Engine {
-	e := &Engine{model: cfg.Triage.Model}
+func New(agent agent.Provider, model string, profiles []config.RepoProfile) *Engine {
+	e := &Engine{agent: agent, model: model}
 	if len(profiles) > 1 {
 		e.repoProfiles = config.FormatForPrompt(profiles)
 	}
@@ -93,42 +93,20 @@ func (e *Engine) Classify(ctx context.Context, msg *islack.IncomingMessage, chan
 	slog.Debug("triage prompt", "prompt", prompt)
 	slog.Debug("running triage", "model", e.model, "text_len", len(msg.Text))
 
-	args := []string{
-		"--print",
-		"--max-turns", "1",
-		"--output-format", "json",
-		"--model", e.model,
-		"-p", prompt,
-	}
-
-	triageCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
-	defer cancel()
-
-	cmd := exec.CommandContext(triageCtx, "claude", args...)
-	var stderr bytes.Buffer
-	cmd.Stderr = &stderr
-	output, err := cmd.Output()
+	result, err := e.agent.Run(ctx, agent.RunOpts{
+		Prompt:      prompt,
+		Model:       e.model,
+		MaxTurns:    1,
+		Timeout:     30 * time.Second,
+		Permissions: agent.PermissionNone,
+	})
 	if err != nil {
-		return nil, fmt.Errorf("claude triage call failed: %w (stderr: %s)", err, stderr.String())
+		return nil, fmt.Errorf("triage call failed: %w", err)
 	}
 
-	slog.Debug("triage raw response", "output", string(output))
+	slog.Debug("triage raw response", "output", result.Result)
 
-	// The output-format json wraps result in a JSON envelope.
-	// Parse the envelope first.
-	var envelope struct {
-		Result  string `json:"result"`
-		IsError bool   `json:"is_error"`
-	}
-	if err := json.Unmarshal(output, &envelope); err != nil {
-		// Try parsing as direct result
-		return parseResult(output)
-	}
-	if envelope.IsError {
-		return nil, fmt.Errorf("claude triage returned error: %s", envelope.Result)
-	}
-
-	return parseResult([]byte(envelope.Result))
+	return parseResult([]byte(result.Result))
 }
 
 func parseResult(data []byte) (*Result, error) {
