@@ -157,6 +157,8 @@ digest:
   # max_auto_spawn_hour: 3      # Max auto-spawns per hour
   # allowed_categories: ["bug"] # Categories eligible for auto-spawn
   # max_est_size: "medium"      # Maximum estimated fix size
+  # investigate_timeout_secs: 600 # Investigation time limit (default: 10 min)
+  # investigate_max_turns: 25     # Investigation turn limit
 
 # ──────────────────────────────────────────────
 # Issue Tracker

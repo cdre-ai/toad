@@ -254,7 +254,7 @@ func TestMigrateClaudeToAgent_OnlyClaude(t *testing.T) {
 	cfg.Agent.AppendSystemPrompt = ""
 
 	// Simulate the migration logic from Load()
-	agentDefaults := AgentConfig{Platform: "claude", Model: "sonnet"}
+	agentDefaults := AgentConfig{Model: "sonnet"}
 	if cfg.Claude.Model != "" && cfg.Agent.Model == agentDefaults.Model {
 		cfg.Agent.Model = cfg.Claude.Model
 	}
@@ -278,7 +278,7 @@ func TestMigrateClaudeToAgent_AgentWins(t *testing.T) {
 	cfg.Agent.Model = "haiku"
 	cfg.Agent.AppendSystemPrompt = "new prompt"
 
-	agentDefaults := AgentConfig{Platform: "claude", Model: "sonnet"}
+	agentDefaults := AgentConfig{Model: "sonnet"}
 	if cfg.Claude.Model != "" && cfg.Agent.Model == agentDefaults.Model {
 		cfg.Agent.Model = cfg.Claude.Model
 	}

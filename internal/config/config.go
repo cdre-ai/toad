@@ -80,15 +80,17 @@ type ClaudeConfig struct {
 }
 
 type DigestConfig struct {
-	Enabled           bool     `yaml:"enabled"`             // default: false (opt-in)
-	DryRun            bool     `yaml:"dry_run"`             // collect + analyze but skip spawn/notify
-	BatchMinutes      int      `yaml:"batch_minutes"`       // default: 5
-	MinConfidence     float64  `yaml:"min_confidence"`      // default: 0.95
-	MaxAutoSpawnHour  int      `yaml:"max_auto_spawn_hour"` // default: 3
-	AllowedCategories []string `yaml:"allowed_categories"`  // default: ["bug"]
-	MaxEstSize        string   `yaml:"max_est_size"`        // default: "medium"
-	MaxChunkSize      int      `yaml:"max_chunk_size"`      // default: 50
-	ChunkTimeoutSecs  int      `yaml:"chunk_timeout_secs"`  // default: 60
+	Enabled                bool     `yaml:"enabled"`                  // default: false (opt-in)
+	DryRun                 bool     `yaml:"dry_run"`                  // collect + analyze but skip spawn/notify
+	BatchMinutes           int      `yaml:"batch_minutes"`            // default: 5
+	MinConfidence          float64  `yaml:"min_confidence"`           // default: 0.95
+	MaxAutoSpawnHour       int      `yaml:"max_auto_spawn_hour"`      // default: 3
+	AllowedCategories      []string `yaml:"allowed_categories"`       // default: ["bug"]
+	MaxEstSize             string   `yaml:"max_est_size"`             // default: "medium"
+	MaxChunkSize           int      `yaml:"max_chunk_size"`           // default: 50
+	ChunkTimeoutSecs       int      `yaml:"chunk_timeout_secs"`       // default: 120
+	InvestigateTimeoutSecs int      `yaml:"investigate_timeout_secs"` // default: 600 (10 min)
+	InvestigateMaxTurns    int      `yaml:"investigate_max_turns"`    // default: 25
 }
 
 type IssueTrackerConfig struct {
@@ -144,14 +146,16 @@ func defaults() *Config {
 		},
 		Claude: ClaudeConfig{}, // deprecated, kept for YAML backward compat
 		Digest: DigestConfig{
-			Enabled:           false,
-			BatchMinutes:      5,
-			MinConfidence:     0.95,
-			MaxAutoSpawnHour:  3,
-			AllowedCategories: []string{"bug"},
-			MaxEstSize:        "medium",
-			MaxChunkSize:      50,
-			ChunkTimeoutSecs:  120,
+			Enabled:                false,
+			BatchMinutes:           5,
+			MinConfidence:          0.95,
+			MaxAutoSpawnHour:       3,
+			AllowedCategories:      []string{"bug"},
+			MaxEstSize:             "medium",
+			MaxChunkSize:           50,
+			ChunkTimeoutSecs:       120,
+			InvestigateTimeoutSecs: 600,
+			InvestigateMaxTurns:    25,
 		},
 		IssueTracker: IssueTrackerConfig{
 			Enabled:  false,
@@ -190,7 +194,7 @@ func Load() (*Config, error) {
 
 	// Migrate deprecated claude: section to agent: — only apply when the
 	// agent field is still at its default so an explicit agent: block wins.
-	agentDefaults := AgentConfig{Platform: "claude", Model: "sonnet"}
+	agentDefaults := AgentConfig{Model: "sonnet"}
 	if cfg.Claude.Model != "" && cfg.Agent.Model == agentDefaults.Model {
 		cfg.Agent.Model = cfg.Claude.Model
 	}

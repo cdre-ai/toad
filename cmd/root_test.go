@@ -283,13 +283,10 @@ func TestTruncate(t *testing.T) {
 }
 
 func TestParseInvestigateResult_ValidFeasible(t *testing.T) {
-	result, err := parseInvestigateResult(
+	result := parseInvestigateResult(
 		`{"feasible": true, "task_spec": "Fix nil check in handler.go", "reasoning": "Clear one-line fix"}`,
 		false,
 	)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
 	if !result.Feasible {
 		t.Error("expected feasible=true")
 	}
@@ -302,13 +299,10 @@ func TestParseInvestigateResult_ValidFeasible(t *testing.T) {
 }
 
 func TestParseInvestigateResult_NotFeasible(t *testing.T) {
-	result, err := parseInvestigateResult(
+	result := parseInvestigateResult(
 		`{"feasible": false, "task_spec": "", "reasoning": "Could not locate the issue"}`,
 		false,
 	)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
 	if result.Feasible {
 		t.Error("expected feasible=false")
 	}
@@ -317,10 +311,7 @@ func TestParseInvestigateResult_NotFeasible(t *testing.T) {
 func TestParseInvestigateResult_HitMaxTurns_NoJSON(t *testing.T) {
 	// When hitMaxTurns is true and there's no parseable JSON, the result
 	// should use the reasonMaxTurns sentinel so the caller knows to resume.
-	result, err := parseInvestigateResult("I was still investigating when I ran out of turns...", true)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
+	result := parseInvestigateResult("I was still investigating when I ran out of turns...", true)
 	if result.Feasible {
 		t.Error("expected feasible=false")
 	}
@@ -331,13 +322,10 @@ func TestParseInvestigateResult_HitMaxTurns_NoJSON(t *testing.T) {
 
 func TestParseInvestigateResult_HitMaxTurns_WithJSON(t *testing.T) {
 	// Even if hitMaxTurns is true, if the agent produced valid JSON, use it.
-	result, err := parseInvestigateResult(
+	result := parseInvestigateResult(
 		`{"feasible": true, "task_spec": "Fix the bug", "reasoning": "Found it just in time"}`,
 		true,
 	)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
 	if !result.Feasible {
 		t.Error("expected feasible=true — valid JSON should be used even if max turns hit")
 	}
@@ -348,10 +336,7 @@ func TestParseInvestigateResult_HitMaxTurns_WithJSON(t *testing.T) {
 
 func TestParseInvestigateResult_NoJSON_NotMaxTurns(t *testing.T) {
 	// When there's no JSON and it's not max turns, the reason should say no JSON found.
-	result, err := parseInvestigateResult("I couldn't find anything relevant.", false)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
+	result := parseInvestigateResult("I couldn't find anything relevant.", false)
 	if result.Feasible {
 		t.Error("expected feasible=false")
 	}
@@ -362,15 +347,12 @@ func TestParseInvestigateResult_NoJSON_NotMaxTurns(t *testing.T) {
 
 func TestParseInvestigateResult_StrayBraces(t *testing.T) {
 	// Regression test: prose containing "{}" before the real JSON.
-	result, err := parseInvestigateResult(
+	result := parseInvestigateResult(
 		`The method protects with ?? {} but misses the other field.
 
 {"feasible": true, "task_spec": "Add null guard", "reasoning": "Clear fix"}`,
 		false,
 	)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
 	if !result.Feasible {
 		t.Error("expected feasible=true — parser should skip stray braces in prose")
 	}

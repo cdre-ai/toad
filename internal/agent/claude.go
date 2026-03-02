@@ -153,8 +153,8 @@ type claudeEnvelope struct {
 func parseEnvelope(output []byte) (*RunResult, error) {
 	var env claudeEnvelope
 	if err := json.Unmarshal(output, &env); err != nil {
-		// Fall back to raw text if envelope parsing fails.
-		return &RunResult{
+		// Not a JSON envelope; treat as raw text output.
+		return &RunResult{ //nolint:nilerr // intentional fallback to raw text
 			Result: strings.TrimSpace(string(output)),
 		}, nil
 	}

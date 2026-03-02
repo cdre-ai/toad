@@ -906,11 +906,20 @@ func investigateOpportunity(ctx context.Context, cfg *config.Config, agentProvid
 		return nil, fmt.Errorf("no repos configured")
 	}
 
+	maxTurns := cfg.Digest.InvestigateMaxTurns
+	if maxTurns <= 0 {
+		maxTurns = 25
+	}
+	timeout := time.Duration(cfg.Digest.InvestigateTimeoutSecs) * time.Second
+	if timeout <= 0 {
+		timeout = 10 * time.Minute
+	}
+
 	runResult, err := agentProvider.Run(ctx, agent.RunOpts{
 		Prompt:         prompt,
 		Model:          cfg.Agent.Model,
-		MaxTurns:       20,
-		Timeout:        7 * time.Minute,
+		MaxTurns:       maxTurns,
+		Timeout:        timeout,
 		Permissions:    agent.PermissionReadOnly,
 		WorkDir:        repoPath,
 		AdditionalDirs: additionalDirs,
@@ -921,27 +930,19 @@ func investigateOpportunity(ctx context.Context, cfg *config.Config, agentProvid
 
 	slog.Debug("investigate raw response", "output", runResult.Result)
 
-	result, err := parseInvestigateResult(runResult.Result, runResult.HitMaxTurns)
-	if err != nil {
-		return nil, err
-	}
+	result := parseInvestigateResult(runResult.Result, runResult.HitMaxTurns)
 
 	// If the investigation hit max turns without a verdict, resume the session
 	// and ask for a final decision based on everything it found so far.
 	if result.Reasoning == reasonMaxTurns && runResult.SessionID != "" {
 		slog.Info("investigation hit max turns, resuming for verdict", "session", runResult.SessionID)
-		resumeCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 30*time.Second)
+		resumeCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 60*time.Second)
 		defer cancel()
 		resumeRunResult, resumeErr := agentProvider.Resume(resumeCtx, runResult.SessionID, resumeVerdictPrompt, repoPath)
 		if resumeErr != nil {
 			slog.Warn("resume for verdict failed", "error", resumeErr)
 		} else {
-			resumeResult, parseErr := parseInvestigateResult(resumeRunResult.Result, resumeRunResult.HitMaxTurns)
-			if parseErr != nil {
-				slog.Warn("resume verdict parse failed", "error", parseErr)
-			} else {
-				return resumeResult, nil
-			}
+			return parseInvestigateResult(resumeRunResult.Result, resumeRunResult.HitMaxTurns), nil
 		}
 	}
 
@@ -1027,25 +1028,17 @@ func investigateTriggered(ctx context.Context, cfg *config.Config, agentProvider
 
 	slog.Debug("triggered investigate raw response", "output", runResult.Result)
 
-	result, err := parseInvestigateResult(runResult.Result, runResult.HitMaxTurns)
-	if err != nil {
-		return nil, err
-	}
+	result := parseInvestigateResult(runResult.Result, runResult.HitMaxTurns)
 
 	if result.Reasoning == reasonMaxTurns && runResult.SessionID != "" {
 		slog.Info("triggered investigation hit max turns, resuming for verdict", "session", runResult.SessionID)
-		resumeCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 30*time.Second)
+		resumeCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 60*time.Second)
 		defer cancel()
 		resumeRunResult, resumeErr := agentProvider.Resume(resumeCtx, runResult.SessionID, resumeVerdictPrompt, repoPath)
 		if resumeErr != nil {
 			slog.Warn("resume for verdict failed", "error", resumeErr)
 		} else {
-			resumeResult, parseErr := parseInvestigateResult(resumeRunResult.Result, resumeRunResult.HitMaxTurns)
-			if parseErr != nil {
-				slog.Warn("resume verdict parse failed", "error", parseErr)
-			} else {
-				return resumeResult, nil
-			}
+			return parseInvestigateResult(resumeRunResult.Result, resumeRunResult.HitMaxTurns), nil
 		}
 	}
 
@@ -1054,7 +1047,7 @@ func investigateTriggered(ctx context.Context, cfg *config.Config, agentProvider
 
 // parseInvestigateResult parses the text result from an investigation agent run.
 // hitMaxTurns indicates the agent reached its turn limit without completing.
-func parseInvestigateResult(resultText string, hitMaxTurns bool) (*digest.InvestigateResult, error) {
+func parseInvestigateResult(resultText string, hitMaxTurns bool) *digest.InvestigateResult {
 	var result struct {
 		Feasible  bool   `json:"feasible"`
 		TaskSpec  string `json:"task_spec"`
@@ -1110,14 +1103,14 @@ func parseInvestigateResult(resultText string, hitMaxTurns bool) (*digest.Invest
 		return &digest.InvestigateResult{
 			Feasible:  false,
 			Reasoning: reason,
-		}, nil
+		}
 	}
 
 	return &digest.InvestigateResult{
 		Feasible:  result.Feasible,
 		TaskSpec:  result.TaskSpec,
 		Reasoning: result.Reasoning,
-	}, nil
+	}
 }
 
 // reasonMaxTurns is the sentinel reasoning string set by parseInvestigateResult
