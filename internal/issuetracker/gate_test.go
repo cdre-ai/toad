@@ -157,6 +157,72 @@ func TestCheckAssigneeGate_NoPermalink(t *testing.T) {
 	}
 }
 
+func TestCheckAssigneeGate_DoneTicket(t *testing.T) {
+	mt := &mockTracker{status: &IssueStatus{
+		State:        "Done",
+		AssigneeName: "Jane Doe",
+		AssignedAt:   time.Now(),
+		InternalID:   "uuid-1",
+	}}
+	gate := CheckAssigneeGate(context.Background(), mt, GateOpts{
+		IssueRef:  &IssueRef{ID: "PLF-1"},
+		StaleDays: 7,
+		Findings:  "Fix something",
+	})
+	if !gate.Gated {
+		t.Fatal("expected gated for Done ticket")
+	}
+	if !gate.Done {
+		t.Error("expected Done=true for terminal state")
+	}
+	if mt.commented {
+		t.Error("should NOT post a comment on Done tickets")
+	}
+}
+
+func TestCheckAssigneeGate_CanceledTicket(t *testing.T) {
+	mt := &mockTracker{status: &IssueStatus{
+		State:      "Cancelled", //nolint:misspell // Linear uses British spelling
+		InternalID: "uuid-1",
+	}}
+	gate := CheckAssigneeGate(context.Background(), mt, GateOpts{
+		IssueRef:  &IssueRef{ID: "PLF-1"},
+		StaleDays: 7,
+	})
+	if !gate.Gated {
+		t.Fatal("expected gated for canceled ticket")
+	}
+	if !gate.Done {
+		t.Error("expected Done=true for canceled state")
+	}
+}
+
+func TestIsDone(t *testing.T) {
+	tests := []struct {
+		state string
+		want  bool
+	}{
+		{"Done", true},
+		{"done", true},
+		{"DONE", true},
+		{"Cancelled", true}, //nolint:misspell // Linear uses British spelling
+		{"cancelled", true}, //nolint:misspell // Linear uses British spelling
+		{"Canceled", true},
+		{"Duplicate", true},
+		{"duplicate", true},
+		{"DUPLICATE", true},
+		{"In Progress", false},
+		{"Todo", false},
+		{"", false},
+	}
+	for _, tt := range tests {
+		s := &IssueStatus{State: tt.state}
+		if got := s.IsDone(); got != tt.want {
+			t.Errorf("IsDone() for state %q = %v, want %v", tt.state, got, tt.want)
+		}
+	}
+}
+
 func TestIsActivelyAssigned(t *testing.T) {
 	tests := []struct {
 		name      string

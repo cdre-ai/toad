@@ -150,7 +150,7 @@ func runDaemon(cmd *cobra.Command, args []string) error {
 	// 8. Initialize PR review watcher
 	prWatcher := reviewer.NewWatcher(stateDB, cfg.Repos, func(ctx context.Context, task tadpole.Task) error {
 		return tadpolePool.Spawn(ctx, task)
-	}, slackClient, agentProvider, cfg.Limits.MaxReviewRounds, cfg.Limits.MaxCIFixRounds, cfg.Triage.Model, vcsResolver)
+	}, slackClient, agentProvider, cfg.Limits.MaxReviewRounds, cfg.Limits.MaxCIFixRounds, cfg.Triage.Model, vcsResolver, cfg.Limits.ReviewBots)
 
 	// Wire PR review tracking — after a successful ship, register the PR for review watching
 	tadpoleRunner.OnShip(func(prURL, branch, runID string, task tadpole.Task) {
@@ -595,10 +595,15 @@ func handleTriggered(
 				})
 				if gate.Gated {
 					slackClient.RemoveReaction(msg.Channel, msg.Timestamp, "eyes")
-					slackClient.ReplyInThread(msg.Channel, threadTS,
-						fmt.Sprintf(":clipboard: %s is assigned to %s — I posted my findings as a comment on the ticket. "+
-							"Say `@toad fix this` if you'd like me to open a PR anyway.",
-							issueRef.ID, gate.Status.AssigneeName))
+					if gate.Done {
+						slog.Info("ticket is done, skipping silently",
+							"issue", issueRef.ID, "state", gate.Status.State)
+					} else {
+						slackClient.ReplyInThread(msg.Channel, threadTS,
+							fmt.Sprintf(":clipboard: %s is assigned to %s — I posted my findings as a comment on the ticket. "+
+								"Say `@toad fix this` if you'd like me to open a PR anyway.",
+								issueRef.ID, gate.Status.AssigneeName))
+					}
 					return
 				}
 			}

@@ -27,6 +27,21 @@ type IssueStatus struct {
 	InternalID   string    // provider's internal UUID (needed for mutations)
 }
 
+// terminalStates lists issue states that mean the work is finished.
+// Toad should not act on these unless explicitly invoked.
+// Keys are lowercase for case-insensitive matching.
+var terminalStates = map[string]bool{
+	"done":      true,
+	"cancelled": true, //nolint:misspell // Linear uses British spelling
+	"canceled":  true,
+	"duplicate": true,
+}
+
+// IsDone returns true if the issue is in a terminal state (Done, Canceled, etc.).
+func (s *IssueStatus) IsDone() bool {
+	return terminalStates[strings.ToLower(s.State)]
+}
+
 // IsActivelyAssigned returns true if the issue has an assignee whose
 // assignment is more recent than the given staleness threshold.
 func (s *IssueStatus) IsActivelyAssigned(staleDays int) bool {

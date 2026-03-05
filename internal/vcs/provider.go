@@ -40,6 +40,9 @@ type Provider interface {
 	// source is the comment type ("review" or "issue") for GitHub API routing.
 	AddCommentReaction(ctx context.Context, prNumber, commentID int, source, reaction, repoPath string) error
 
+	// PostPRComment posts a text comment on a PR (issue comment for GitHub, note for GitLab).
+	PostPRComment(ctx context.Context, prNumber int, body, repoPath string) error
+
 	// ListBotPRs returns PR numbers authored by bots targeting the given branch.
 	ListBotPRs(ctx context.Context, branch, repoPath string) ([]int, error)
 

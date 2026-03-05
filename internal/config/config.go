@@ -59,14 +59,15 @@ type ServiceConfig struct {
 }
 
 type LimitsConfig struct {
-	MaxConcurrent   int `yaml:"max_concurrent"`
-	MaxTurns        int `yaml:"max_turns"`
-	TimeoutMinutes  int `yaml:"timeout_minutes"`
-	MaxFilesChanged int `yaml:"max_files_changed"`
-	MaxRetries      int `yaml:"max_retries"`
-	MaxReviewRounds int `yaml:"max_review_rounds"`
-	MaxCIFixRounds  int `yaml:"max_ci_fix_rounds"`
-	HistorySize     int `yaml:"history_size"`
+	MaxConcurrent   int      `yaml:"max_concurrent"`
+	MaxTurns        int      `yaml:"max_turns"`
+	TimeoutMinutes  int      `yaml:"timeout_minutes"`
+	MaxFilesChanged int      `yaml:"max_files_changed"`
+	MaxRetries      int      `yaml:"max_retries"`
+	MaxReviewRounds int      `yaml:"max_review_rounds"`
+	MaxCIFixRounds  int      `yaml:"max_ci_fix_rounds"`
+	HistorySize     int      `yaml:"history_size"`
+	ReviewBots      []string `yaml:"review_bots"` // bot usernames whose PR comments can trigger fixes (e.g. "greptile[bot]")
 }
 
 type TriageConfig struct {

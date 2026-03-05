@@ -13,7 +13,8 @@ import (
 // stubVCS implements only the methods needed for triageComments testing.
 type stubVCS struct{ vcs.Provider }
 
-func (stubVCS) PRNoun() string { return "PR" }
+func (stubVCS) PRNoun() string                                            { return "PR" }
+func (stubVCS) PostPRComment(_ context.Context, _ int, _, _ string) error { return nil }
 
 func TestTriageComments_RunOptsWiring(t *testing.T) {
 	mock := &agent.MockProvider{
@@ -157,6 +158,72 @@ func TestTriageComments_BotCommentsInContext(t *testing.T) {
 	opts := mock.RunCalls[0]
 	if strings.Contains(opts.Prompt, "lint-bot") {
 		t.Error("triage prompt should not contain bot comments")
+	}
+}
+
+func TestTriageComments_ReviewBotIncluded(t *testing.T) {
+	mock := &agent.MockProvider{
+		RunResult: &agent.RunResult{
+			Result: `{"actionable":true,"summary":"fix security issue","reason":"bot found real bug"}`,
+		},
+	}
+
+	w := &Watcher{
+		agent:       mock,
+		triageModel: "haiku",
+		reviewBots:  map[string]bool{"greptile[bot]": true},
+	}
+
+	// Review bot is in allowed list — should appear in triage prompt with [review-bot] label
+	newComments := []vcs.PRComment{
+		{UserLogin: "greptile[bot]", Body: "SQL injection on line 42", Source: "review", UserType: "Bot", Path: "handler.go"},
+	}
+
+	result, err := w.triageComments(context.Background(), stubVCS{}, 99, newComments, newComments)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	opts := mock.RunCalls[0]
+	if !strings.Contains(opts.Prompt, "greptile[bot]") {
+		t.Error("triage prompt should contain allowed review bot")
+	}
+	if !strings.Contains(opts.Prompt, "[review-bot]") {
+		t.Error("review bot should be labeled [review-bot] in triage prompt")
+	}
+
+	// Task description should include the bot caveat
+	if !strings.Contains(result.TaskDescription, "[review-bot]") {
+		t.Error("task description should label review bot comments")
+	}
+	if !strings.Contains(result.TaskDescription, "overconfident") {
+		t.Error("task description should warn about bot reliability")
+	}
+}
+
+func TestFilterComments_ReviewBotPassesThrough(t *testing.T) {
+	w := &Watcher{
+		reviewBots: map[string]bool{"greptile[bot]": true},
+	}
+
+	allComments := []vcs.PRComment{
+		{ID: 1, UserLogin: "greptile[bot]", Body: "found a bug", Source: "review", UserType: "Bot"},
+		{ID: 2, UserLogin: "random-bot", Body: "lint warning", Source: "review", UserType: "Bot"},
+	}
+
+	var newComments []vcs.PRComment
+	for _, c := range allComments {
+		if c.UserType == "Bot" && !w.reviewBots[c.UserLogin] {
+			continue
+		}
+		newComments = append(newComments, c)
+	}
+
+	if len(newComments) != 1 {
+		t.Fatalf("expected 1 comment (allowed review bot only), got %d", len(newComments))
+	}
+	if newComments[0].UserLogin != "greptile[bot]" {
+		t.Errorf("expected greptile[bot], got %q", newComments[0].UserLogin)
 	}
 }
 

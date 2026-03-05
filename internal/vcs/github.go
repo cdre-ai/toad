@@ -345,6 +345,20 @@ func ghCommentToPRComment(c ghComment) PRComment {
 	}
 }
 
+func (g *GitHubProvider) PostPRComment(ctx context.Context, prNumber int, body, repoPath string) error {
+	cmd := exec.CommandContext(ctx, "gh", "api", "--method", "POST",
+		fmt.Sprintf("repos/{owner}/{repo}/issues/%d/comments", prNumber),
+		"-f", "body="+body)
+	cmd.Dir = repoPath
+
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+	if err := cmd.Run(); err != nil {
+		return fmt.Errorf("posting PR comment: %w: %s", err, strings.TrimSpace(stderr.String()))
+	}
+	return nil
+}
+
 func (g *GitHubProvider) AddCommentReaction(ctx context.Context, prNumber, commentID int, source, reaction, repoPath string) error {
 	// GitHub has separate reaction endpoints for review comments vs issue comments.
 	endpoint := fmt.Sprintf("repos/{owner}/{repo}/issues/comments/%d/reactions", commentID)

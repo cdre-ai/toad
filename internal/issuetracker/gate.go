@@ -7,9 +7,10 @@ import (
 )
 
 // GateResult describes the outcome of checking whether a spawn should be gated
-// because the referenced ticket is actively assigned to someone.
+// because the referenced ticket is actively assigned to someone or already done.
 type GateResult struct {
 	Gated  bool         // true if the spawn should be blocked
+	Done   bool         // true if the ticket is in a terminal state (Done, Canceled, etc.)
 	Status *IssueStatus // the fetched status (non-nil only when Gated)
 }
 
@@ -40,6 +41,14 @@ func CheckAssigneeGate(ctx context.Context, tracker Tracker, opts GateOpts) *Gat
 	}
 	if status == nil {
 		return &GateResult{Gated: false}
+	}
+
+	// Terminal state: ticket is already Done/Canceled — silently skip.
+	// No comment, no spawn. Only a direct @toad invocation should override.
+	if status.IsDone() {
+		slog.Info("ticket is in terminal state, skipping silently",
+			"issue", opts.IssueRef.ID, "state", status.State)
+		return &GateResult{Gated: true, Done: true, Status: status}
 	}
 
 	if !status.IsActivelyAssigned(opts.StaleDays) {

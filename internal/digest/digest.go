@@ -224,6 +224,7 @@ func (e *Engine) flush(ctx context.Context) {
 	e.totalProcessed.Add(int64(len(msgs)))
 
 	chunks := e.buildChunks(msgs)
+	gatedTickets := map[string]bool{} // tracks tickets already gated/commented on in this flush
 	slog.Debug("digest analyzing batch", "messages", len(msgs), "chunks", len(chunks))
 
 	for _, ch := range chunks {
@@ -246,7 +247,7 @@ func (e *Engine) flush(ctx context.Context) {
 			continue
 		}
 
-		if !e.processOpportunities(ctx, ch.messages, opportunities) {
+		if !e.processOpportunities(ctx, ch.messages, opportunities, gatedTickets) {
 			return // spawn limit reached
 		}
 	}
@@ -255,7 +256,8 @@ func (e *Engine) flush(ctx context.Context) {
 // processOpportunities handles the investigation, persistence, and spawn logic
 // for a set of opportunities from a single chunk. Returns false when the hourly
 // spawn limit is reached (caller should stop processing further chunks).
-func (e *Engine) processOpportunities(ctx context.Context, msgs []Message, opportunities []Opportunity) bool {
+// gatedTickets tracks ticket IDs already gated in this flush to avoid duplicate comments.
+func (e *Engine) processOpportunities(ctx context.Context, msgs []Message, opportunities []Opportunity, gatedTickets map[string]bool) bool {
 	for _, opp := range opportunities {
 		if !e.passesGuardrails(opp) {
 			slog.Debug("digest opportunity filtered by guardrails",
@@ -446,7 +448,17 @@ func (e *Engine) processOpportunities(ctx context.Context, msgs []Message, oppor
 
 		// Ticket assignee gate: if the ticket is actively assigned,
 		// post findings to the ticket instead of spawning.
+		// If the ticket is Done/Canceled, skip silently — no comment, no spawn.
+		// Dedup: if we already gated this ticket in this flush, skip without another comment.
 		if e.respectAssignees && issueRef != nil {
+			if gatedTickets[issueRef.ID] {
+				slog.Info("digest skipping: ticket already gated in this flush",
+					"issue", issueRef.ID, "summary", opp.Summary)
+				if e.unclaim != nil {
+					e.unclaim(threadTS)
+				}
+				continue
+			}
 			permalink := ""
 			if e.getPermalink != nil {
 				permalink, _ = e.getPermalink(msg.Channel, msg.Timestamp)
@@ -458,7 +470,8 @@ func (e *Engine) processOpportunities(ctx context.Context, msgs []Message, oppor
 				SlackPermalink: permalink,
 			})
 			if gate.Gated {
-				if e.notify != nil {
+				gatedTickets[issueRef.ID] = true
+				if !gate.Done && e.notify != nil {
 					e.notify(msg.Channel, threadTS,
 						fmt.Sprintf(":clipboard: %s is assigned to %s — I posted my findings as a comment on the ticket. "+
 							"Say `@toad fix this` if you'd like me to open a PR.",

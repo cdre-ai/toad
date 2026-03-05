@@ -495,7 +495,7 @@ func TestProcessOpportunities_SpawnLimitReturnsFalse(t *testing.T) {
 		{Summary: "fix 2", Category: "bug", Confidence: 0.99, EstSize: "small", MessageIdx: 1},
 	}
 
-	result := e.processOpportunities(context.Background(), msgs, opps)
+	result := e.processOpportunities(context.Background(), msgs, opps, map[string]bool{})
 
 	// With MaxAutoSpawnHour=1, the second opportunity should hit the limit
 	if result {
@@ -571,7 +571,7 @@ func TestProcessOpportunities_TrackerExtractsRef(t *testing.T) {
 	msgs := []Message{{Text: "bug in PLF-42", Channel: "C1", ChannelName: "errors", Timestamp: "1"}}
 	opps := []Opportunity{{Summary: "fix bug", Category: "bug", Confidence: 0.99, EstSize: "small", MessageIdx: 0}}
 
-	e.processOpportunities(context.Background(), msgs, opps)
+	e.processOpportunities(context.Background(), msgs, opps, map[string]bool{})
 
 	// In dry-run mode the task isn't actually spawned via spawn(), but the
 	// issue ref should have been extracted. Verify via totalSpawns counter.
@@ -611,7 +611,7 @@ func TestProcessOpportunities_TrackerCreatesIssue(t *testing.T) {
 	msgs := []Message{{Text: "something broke", Channel: "C1", ChannelName: "errors", Timestamp: "1"}}
 	opps := []Opportunity{{Summary: "fix it", Category: "bug", Confidence: 0.99, EstSize: "small", MessageIdx: 0}}
 
-	e.processOpportunities(context.Background(), msgs, opps)
+	e.processOpportunities(context.Background(), msgs, opps, map[string]bool{})
 
 	if !tracker.createCalled {
 		t.Error("expected CreateIssue to be called when no ref extracted and createIssues=true")
@@ -646,7 +646,7 @@ func TestProcessOpportunities_TrackerNoCreateWhenDisabled(t *testing.T) {
 	msgs := []Message{{Text: "bug", Channel: "C1", ChannelName: "errors", Timestamp: "1"}}
 	opps := []Opportunity{{Summary: "fix", Category: "bug", Confidence: 0.99, EstSize: "small", MessageIdx: 0}}
 
-	e.processOpportunities(context.Background(), msgs, opps)
+	e.processOpportunities(context.Background(), msgs, opps, map[string]bool{})
 
 	if tracker.createCalled {
 		t.Error("CreateIssue should not be called when createIssues=false")

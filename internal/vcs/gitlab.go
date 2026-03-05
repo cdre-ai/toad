@@ -342,6 +342,21 @@ func (g *GitLabProvider) GetPRComments(ctx context.Context, prNumber int, repoPa
 	return comments, nil
 }
 
+func (g *GitLabProvider) PostPRComment(ctx context.Context, prNumber int, body, repoPath string) error {
+	cmd := g.glabCmd(ctx, repoPath,
+		"api", "--method", "POST",
+		fmt.Sprintf("projects/:fullpath/merge_requests/%d/notes", prNumber),
+		"-f", "body="+body,
+	)
+
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+	if err := cmd.Run(); err != nil {
+		return fmt.Errorf("posting MR comment: %w: %s", err, strings.TrimSpace(stderr.String()))
+	}
+	return nil
+}
+
 func (g *GitLabProvider) AddCommentReaction(ctx context.Context, prNumber, commentID int, _, reaction, repoPath string) error {
 	// GitLab award emojis use different names than GitHub reactions.
 	if name, ok := gitlabEmojiMap[reaction]; ok {
