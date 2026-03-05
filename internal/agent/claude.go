@@ -122,7 +122,8 @@ func buildArgs(opts RunOpts) []string {
 
 	switch opts.Permissions {
 	case PermissionFull:
-		args = append(args, "--dangerously-skip-permissions")
+		args = append(args, "--permission-mode", "acceptEdits",
+			"--allowedTools", "Read,Write,Edit,Glob,Grep,Bash,Agent")
 	case PermissionReadOnly:
 		args = append(args, "--allowedTools", "Read,Glob,Grep")
 	}

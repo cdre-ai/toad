@@ -104,8 +104,10 @@ func TestBuildArgs_PermissionFull(t *testing.T) {
 		Permissions: PermissionFull,
 		Prompt:      "fix it",
 	})
-	assertContains(t, args, "--dangerously-skip-permissions")
-	assertNotContains(t, args, "--allowedTools")
+	assertContains(t, args, "--permission-mode")
+	assertContains(t, args, "acceptEdits")
+	assertContains(t, args, "--allowedTools")
+	assertNotContains(t, args, "--dangerously-skip-permissions")
 }
 
 func TestBuildArgs_AdditionalDirs(t *testing.T) {
