@@ -39,8 +39,8 @@ RUN GLAB_VERSION=$(curl -fsSL https://gitlab.com/api/v4/projects/34675721/releas
 ARG TARGETPLATFORM
 COPY ${TARGETPLATFORM}/toad /usr/local/bin/toad
 
-# Create toad user (uid/gid 1000 to match EFS access point)
-RUN groupadd -f -g 1000 toad && useradd -u 1000 -g 1000 -m -s /bin/bash toad
+# Replace default ubuntu user (uid/gid 1000) with toad user for EFS access point
+RUN userdel -r ubuntu 2>/dev/null; groupadd -f -g 1000 toad && useradd -u 1000 -g 1000 -m -s /bin/bash toad
 
 USER toad
 WORKDIR /home/toad
