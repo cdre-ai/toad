@@ -121,6 +121,11 @@ func migrate(db *sql.DB) error {
 			updated_at DATETIME NOT NULL
 		);
 
+		CREATE TABLE IF NOT EXISTS settings (
+			key   TEXT PRIMARY KEY,
+			value TEXT NOT NULL
+		);
+
 		CREATE TABLE IF NOT EXISTS digest_opportunities (
 			id            INTEGER PRIMARY KEY AUTOINCREMENT,
 			summary       TEXT NOT NULL,
@@ -775,6 +780,8 @@ type DaemonStats struct {
 	Heartbeat        time.Time        `json:"heartbeat"`
 	StartedAt        time.Time        `json:"started_at"`
 	PID              int              `json:"pid"`
+	Version          string           `json:"version,omitempty"`
+	Draining         bool             `json:"draining,omitempty"`
 	Ribbits          int64            `json:"ribbits"`
 	Triages          int64            `json:"triages"`
 	TriageByCategory map[string]int64 `json:"triage_by_category"`
@@ -820,6 +827,26 @@ func (d *DB) ReadDaemonStats() (*DaemonStats, error) {
 		return nil, fmt.Errorf("parsing daemon stats: %w", err)
 	}
 	return &stats, nil
+}
+
+// GetSetting reads a setting value by key. Returns "" if not found.
+func (d *DB) GetSetting(key string) (string, error) {
+	ctx, cancel := dbCtx()
+	defer cancel()
+	var value string
+	err := d.db.QueryRowContext(ctx, "SELECT value FROM settings WHERE key = ?", key).Scan(&value)
+	if err == sql.ErrNoRows {
+		return "", nil
+	}
+	return value, err
+}
+
+// SetSetting upserts a setting value.
+func (d *DB) SetSetting(key, value string) error {
+	ctx, cancel := dbCtx()
+	defer cancel()
+	_, err := d.db.ExecContext(ctx, "INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)", key, value)
+	return err
 }
 
 // ClearDaemonStats removes daemon stats (called on clean shutdown).

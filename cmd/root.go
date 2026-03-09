@@ -218,9 +218,22 @@ func runDaemon(cmd *cobra.Command, args []string) error {
 		}()
 	})
 
-	// 11. Handle graceful shutdown
+	// 11. Handle graceful shutdown (SIGINT/SIGTERM exit, SIGUSR1 restart)
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer cancel()
+
+	var restartRequested atomic.Bool
+	restartCh := make(chan os.Signal, 1)
+	notifyRestart(restartCh)
+	go func() {
+		select {
+		case <-restartCh:
+			slog.Info("restart requested (SIGUSR1), draining work...")
+			restartRequested.Store(true)
+			cancel() // trigger the same graceful shutdown path
+		case <-ctx.Done():
+		}
+	}()
 
 	repoNames := make([]string, len(cfg.Repos))
 	for i, r := range cfg.Repos {
@@ -258,58 +271,98 @@ func runDaemon(cmd *cobra.Command, args []string) error {
 		}
 	}()
 
+	// Pool shutdown goroutine — drains messages and waits for tadpoles
+	poolDone := make(chan struct{})
+	go func() {
+		<-ctx.Done()
+		slog.Info("shutting down...")
+		messageWg.Wait()
+		grace := 30 * time.Second
+		if restartRequested.Load() {
+			grace = 30 * time.Minute
+			slog.Info("restart mode: waiting up to 30m for tadpoles to finish")
+		}
+		tadpolePool.Shutdown(grace)
+		close(poolDone)
+	}()
+
 	// Write daemon stats to SQLite every 10s for the dashboard
 	daemonStartedAt := time.Now()
 	go func() {
 		ticker := time.NewTicker(10 * time.Second)
 		defer ticker.Stop()
+
+		writeStats := func(draining bool) {
+			ds := &state.DaemonStats{
+				Heartbeat: time.Now(),
+				StartedAt: daemonStartedAt,
+				PID:       os.Getpid(),
+				Version:   Version,
+				Draining:  draining,
+				Ribbits:   daemonCounters.ribbits.Load(),
+				Triages:   daemonCounters.triages.Load(),
+				TriageByCategory: map[string]int64{
+					"bug":      daemonCounters.triageBug.Load(),
+					"feature":  daemonCounters.triageFeature.Load(),
+					"question": daemonCounters.triageQuestion.Load(),
+					"other":    daemonCounters.triageOther.Load(),
+				},
+				DigestEnabled: cfg.Digest.Enabled,
+				DigestDryRun:  cfg.Digest.DryRun,
+			}
+			if digestEngine != nil {
+				dstats := digestEngine.Stats()
+				ds.DigestBuffer = dstats.BufferSize
+				ds.DigestNextFlush = dstats.NextFlush
+				ds.DigestProcessed = dstats.TotalProcessed
+				ds.DigestOpps = dstats.TotalOpps
+				ds.DigestSpawns = dstats.TotalSpawns
+			}
+			if err := stateDB.WriteDaemonStats(ds); err != nil {
+				slog.Debug("failed to write daemon stats", "error", err)
+			}
+		}
+
 		for {
 			select {
 			case <-ticker.C:
-				ds := &state.DaemonStats{
-					Heartbeat: time.Now(),
-					StartedAt: daemonStartedAt,
-					PID:       os.Getpid(),
-					Ribbits:   daemonCounters.ribbits.Load(),
-					Triages:   daemonCounters.triages.Load(),
-					TriageByCategory: map[string]int64{
-						"bug":      daemonCounters.triageBug.Load(),
-						"feature":  daemonCounters.triageFeature.Load(),
-						"question": daemonCounters.triageQuestion.Load(),
-						"other":    daemonCounters.triageOther.Load(),
-					},
-					DigestEnabled: cfg.Digest.Enabled,
-					DigestDryRun:  cfg.Digest.DryRun,
-				}
-				if digestEngine != nil {
-					dstats := digestEngine.Stats()
-					ds.DigestBuffer = dstats.BufferSize
-					ds.DigestNextFlush = dstats.NextFlush
-					ds.DigestProcessed = dstats.TotalProcessed
-					ds.DigestOpps = dstats.TotalOpps
-					ds.DigestSpawns = dstats.TotalSpawns
-				}
-				if err := stateDB.WriteDaemonStats(ds); err != nil {
-					slog.Debug("failed to write daemon stats", "error", err)
-				}
+				writeStats(false)
 			case <-ctx.Done():
+				if restartRequested.Load() {
+					// Keep heartbeating with draining=true so the dashboard
+					// can show a modal with in-flight work until we're done.
+					writeStats(true)
+					for {
+						select {
+						case <-ticker.C:
+							writeStats(true)
+						case <-poolDone:
+							stateDB.ClearDaemonStats()
+							return
+						}
+					}
+				}
 				stateDB.ClearDaemonStats()
 				return
 			}
 		}
 	}()
 
-	poolDone := make(chan struct{})
-	go func() {
-		<-ctx.Done()
-		slog.Info("shutting down...")
-		messageWg.Wait()
-		tadpolePool.Shutdown(context.Background())
-		close(poolDone)
-	}()
-
 	slackErr := slackClient.Run(ctx)
 	<-poolDone
+
+	if restartRequested.Load() {
+		binary, err := os.Executable()
+		if err != nil {
+			return fmt.Errorf("restart: could not find executable: %w", err)
+		}
+		slog.Info("restarting toad", "binary", binary)
+		// Close DB explicitly since execReplace may replace the process
+		// and deferred Close() won't run.
+		_ = stateDB.Close()
+		return execReplace(binary, os.Args, os.Environ())
+	}
+
 	return slackErr
 }
 

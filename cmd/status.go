@@ -50,6 +50,13 @@ func runStatus(cmd *cobra.Command, args []string) error {
 		w.Write([]byte(dashboardHTML))
 	})
 	mux.HandleFunc("/api/data", apiDataHandler(db, cfg))
+	mux.HandleFunc("/api/check-update", apiCheckUpdateHandler())
+	mux.HandleFunc("/api/update", apiUpdateHandler())
+	mux.HandleFunc("/api/restart", apiRestartHandler(db))
+	mux.HandleFunc("/api/auto-update", apiAutoUpdateHandler(db))
+
+	// Start auto-update background loop
+	go autoUpdateLoop(db)
 
 	addr := fmt.Sprintf("127.0.0.1:%d", statusPort)
 	ln, err := net.Listen("tcp", addr)
@@ -78,6 +85,7 @@ type apiResponse struct {
 	Config        *apiConfig          `json:"config,omitempty"`
 	CCUsage       *apiCCUsage         `json:"cc_usage,omitempty"`
 	PRNoun        string              `json:"pr_noun"`
+	AutoUpdate    bool                `json:"auto_update"`
 	Now           int64               `json:"now"`
 }
 
@@ -110,7 +118,9 @@ type apiIntegration struct {
 
 type apiDaemon struct {
 	Running          bool             `json:"running"`
+	Draining         bool             `json:"draining,omitempty"`
 	Version          string           `json:"version"`
+	DaemonVersion    string           `json:"daemon_version,omitempty"`
 	Uptime           float64          `json:"uptime_s,omitempty"`
 	PID              int              `json:"pid,omitempty"`
 	Ribbits          int64            `json:"ribbits"`
@@ -235,8 +245,12 @@ func apiDataHandler(db *state.DB, cfg *config.Config) http.HandlerFunc {
 		daemon := &apiDaemon{Version: Version}
 		if daemonStats != nil && now.Sub(daemonStats.Heartbeat) < 30*time.Second {
 			daemon.Running = true
+			daemon.Draining = daemonStats.Draining
 			daemon.Uptime = now.Sub(daemonStats.StartedAt).Seconds()
 			daemon.PID = daemonStats.PID
+			if daemonStats.Version != "" {
+				daemon.DaemonVersion = daemonStats.Version
+			}
 			daemon.Ribbits = daemonStats.Ribbits
 			daemon.Triages = daemonStats.Triages
 			daemon.TriageByCategory = daemonStats.TriageByCategory
@@ -405,9 +419,211 @@ func apiDataHandler(db *state.DB, cfg *config.Config) http.HandlerFunc {
 		resp.CCUsage = fetchCCUsage()
 
 		resp.PRNoun = prNoun
+		if v, _ := db.GetSetting("auto_update"); v == "1" {
+			resp.AutoUpdate = true
+		}
 
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(resp)
+	}
+}
+
+func apiCheckUpdateHandler() http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		// Force refresh by clearing cache
+		versionMu.Lock()
+		versionCacheAt = time.Time{}
+		versionMu.Unlock()
+
+		info := checkVersion()
+		resp := map[string]any{"checked": true}
+		if info != nil {
+			resp["available"] = info.Available
+			resp["latest"] = info.Latest
+			resp["current"] = info.Current
+		}
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(resp)
+	}
+}
+
+func apiUpdateHandler() http.HandlerFunc {
+	var (
+		mu      sync.Mutex
+		running bool
+	)
+
+	return func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+
+		mu.Lock()
+		if running {
+			mu.Unlock()
+			json.NewEncoder(w).Encode(map[string]any{"status": "running"})
+			return
+		}
+		running = true
+		mu.Unlock()
+
+		go func() {
+			defer func() {
+				mu.Lock()
+				running = false
+				mu.Unlock()
+			}()
+
+			hasBrew := exec.Command("brew", "--version").Run() == nil //nolint:gosec
+			if !hasBrew {
+				slog.Warn("update: homebrew not found")
+				return
+			}
+
+			if out, err := exec.Command("brew", "update").CombinedOutput(); err != nil {
+				slog.Warn("update: brew update failed", "output", strings.TrimSpace(string(out)))
+				return
+			}
+
+			if out, err := exec.Command("brew", "upgrade", "--cask", "toad").CombinedOutput(); err != nil {
+				msg := strings.TrimSpace(string(out))
+				if !strings.Contains(msg, "already installed") {
+					slog.Warn("update: brew upgrade failed", "output", msg)
+					return
+				}
+			}
+
+			// Mark version as up-to-date so the dashboard stops showing
+			// "update available". The dashboard binary still has the old Version,
+			// but the on-disk binary is updated — a restart will pick it up.
+			versionMu.Lock()
+			versionCache = &update.Info{Available: false}
+			versionCacheAt = time.Now()
+			versionMu.Unlock()
+		}()
+
+		json.NewEncoder(w).Encode(map[string]any{"status": "started"})
+	}
+}
+
+func apiRestartHandler(db *state.DB) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+
+		stats, err := db.ReadDaemonStats()
+		if err != nil || stats == nil || time.Since(stats.Heartbeat) > 30*time.Second {
+			json.NewEncoder(w).Encode(map[string]any{"error": "no running daemon found"})
+			return
+		}
+
+		pid := stats.PID
+		if pid <= 0 {
+			json.NewEncoder(w).Encode(map[string]any{"error": "invalid daemon PID"})
+			return
+		}
+
+		if err := signalRestart(pid); err != nil {
+			json.NewEncoder(w).Encode(map[string]any{"error": fmt.Sprintf("failed to signal PID %d: %v", pid, err)})
+			return
+		}
+
+		json.NewEncoder(w).Encode(map[string]any{"ok": true, "pid": pid})
+	}
+}
+
+func apiAutoUpdateHandler(db *state.DB) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+
+		if r.Method == http.MethodPost {
+			enabled := r.URL.Query().Get("enabled") == "1"
+			val := "0"
+			if enabled {
+				val = "1"
+			}
+			if err := db.SetSetting("auto_update", val); err != nil {
+				json.NewEncoder(w).Encode(map[string]any{"error": err.Error()})
+				return
+			}
+			json.NewEncoder(w).Encode(map[string]any{"enabled": enabled})
+			return
+		}
+
+		v, _ := db.GetSetting("auto_update")
+		json.NewEncoder(w).Encode(map[string]any{"enabled": v == "1"})
+	}
+}
+
+// autoUpdateLoop runs in the background while the dashboard is open.
+// When auto-update is enabled, it checks for new versions every 5 minutes
+// and automatically updates + restarts the daemon when one is found.
+func autoUpdateLoop(db *state.DB) {
+	ticker := time.NewTicker(5 * time.Minute)
+	defer ticker.Stop()
+
+	for range ticker.C {
+		v, _ := db.GetSetting("auto_update")
+		if v != "1" {
+			continue
+		}
+
+		// Use the daemon's actual running version for the comparison,
+		// not the dashboard binary version (which may be stale).
+		checkVer := Version
+		if stats, err := db.ReadDaemonStats(); err == nil && stats != nil && stats.Version != "" {
+			checkVer = stats.Version
+		}
+
+		info, err := update.Check(checkVer)
+		if err != nil || info == nil || !info.Available {
+			continue
+		}
+
+		slog.Info("auto-update: new version available", "current", info.Current, "latest", info.Latest)
+
+		// Run brew upgrade
+		hasBrew := exec.Command("brew", "--version").Run() == nil //nolint:gosec // fixed binary
+		if !hasBrew {
+			slog.Warn("auto-update: homebrew not found, skipping")
+			continue
+		}
+
+		if out, err := exec.Command("brew", "update").CombinedOutput(); err != nil {
+			slog.Warn("auto-update: brew update failed", "output", strings.TrimSpace(string(out)))
+			continue
+		}
+
+		if out, err := exec.Command("brew", "upgrade", "--cask", "toad").CombinedOutput(); err != nil {
+			msg := strings.TrimSpace(string(out))
+			if !strings.Contains(msg, "already installed") {
+				slog.Warn("auto-update: brew upgrade failed", "output", msg)
+				continue
+			}
+		}
+
+		slog.Info("auto-update: update installed, sending restart signal")
+
+		// Mark as up-to-date so we don't re-trigger on next tick
+		versionMu.Lock()
+		versionCache = &update.Info{Available: false}
+		versionCacheAt = time.Now()
+		versionMu.Unlock()
+
+		// Signal daemon to restart (skip if already draining)
+		stats, err := db.ReadDaemonStats()
+		if err != nil || stats == nil || time.Since(stats.Heartbeat) > 30*time.Second {
+			slog.Warn("auto-update: daemon not running, skipping restart")
+			continue
+		}
+		if stats.Draining {
+			slog.Info("auto-update: daemon already restarting, skipping signal")
+			continue
+		}
+		if stats.PID > 0 {
+			if err := signalRestart(stats.PID); err != nil {
+				slog.Warn("auto-update: failed to signal daemon", "pid", stats.PID, "error", err)
+			} else {
+				slog.Info("auto-update: restart signal sent", "pid", stats.PID)
+			}
+		}
 	}
 }
 
@@ -444,7 +660,7 @@ func checkVersion() *update.Info {
 	versionMu.Lock()
 	defer versionMu.Unlock()
 
-	if time.Since(versionCacheAt) < 4*time.Hour {
+	if time.Since(versionCacheAt) < 30*time.Minute {
 		return versionCache
 	}
 	defer func() { versionCacheAt = time.Now() }()
@@ -602,6 +818,58 @@ const dashboardHTML = `<!DOCTYPE html>
     padding: 3px 10px; border-radius: 12px;
     background: rgba(255,193,7,0.15); color: var(--amber);
   }
+  .action-btn {
+    font-size: 12px; font-weight: 500;
+    padding: 4px 12px; border-radius: 6px;
+    border: 1px solid var(--border); background: var(--surface);
+    color: var(--text); cursor: pointer;
+    transition: background 0.15s, border-color 0.15s;
+  }
+  .action-btn:hover { border-color: var(--accent); background: rgba(88,166,255,0.1); }
+  .action-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+  .action-btn.danger { border-color: var(--amber); color: var(--amber); }
+  .action-btn.danger:hover { background: rgba(255,193,7,0.1); }
+  .toggle-label {
+    display: inline-flex; align-items: center; gap: 6px;
+    font-size: 12px; cursor: pointer; user-select: none;
+    padding: 4px 10px; border-radius: 6px;
+    border: 1px solid var(--border); background: var(--surface);
+    color: var(--dim); transition: border-color 0.15s;
+  }
+  .toggle-label:hover { border-color: var(--accent); }
+  .toggle-label input[type="checkbox"] { accent-color: var(--green); }
+  .toggle-label.active { color: var(--green); border-color: var(--green); }
+  .version-mismatch {
+    font-size: 11px; color: var(--amber);
+    padding: 2px 8px; border-radius: 10px;
+    background: rgba(255,193,7,0.1);
+  }
+  /* Modal overlay */
+  .modal-overlay {
+    display: none; position: fixed; inset: 0;
+    background: rgba(0,0,0,0.6); z-index: 100;
+    justify-content: center; align-items: center;
+  }
+  .modal-overlay.visible { display: flex; }
+  .modal {
+    background: var(--surface); border: 1px solid var(--border);
+    border-radius: 12px; padding: 24px; min-width: 420px; max-width: 560px;
+  }
+  .modal h3 { font-size: 16px; font-weight: 600; margin-bottom: 12px; }
+  .modal .modal-status {
+    font-size: 13px; color: var(--dim); margin-bottom: 16px;
+  }
+  .modal .modal-runs { margin-bottom: 16px; }
+  .modal .modal-run {
+    display: flex; align-items: center; gap: 8px;
+    padding: 8px 10px; font-size: 13px;
+    border-bottom: 1px solid var(--border);
+  }
+  .modal .modal-run:last-child { border-bottom: none; }
+  .modal .modal-run .run-task { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .modal .modal-run .run-duration { color: var(--dim); font-family: monospace; font-size: 12px; }
+  .modal .modal-footer { text-align: right; }
+  .modal .modal-footer .action-btn { margin-left: 8px; }
   @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:0.3} }
 
   /* Integrations row */
@@ -789,6 +1057,14 @@ const dashboardHTML = `<!DOCTYPE html>
   <h1>&#x1f438; toad dashboard</h1>
   <div class="header-right">
     <span class="update-badge" id="update-badge"></span>
+    <span id="version-mismatch" class="version-mismatch" style="display:none"></span>
+    <button class="action-btn" id="btn-check-update" onclick="checkForUpdate()" title="Check for updates">Check updates</button>
+    <button class="action-btn" id="btn-update" onclick="doUpdate()" style="display:none" title="Download and install latest version">Update</button>
+    <label class="toggle-label" id="auto-update-toggle" title="Automatically update and restart when new versions are available">
+      <input type="checkbox" id="auto-update-cb" onchange="toggleAutoUpdate(this.checked)">
+      <span class="toggle-text">Auto update</span>
+    </label>
+    <button class="action-btn danger" id="btn-restart" onclick="doRestart()" title="Gracefully restart daemon (waits for in-flight work)">Restart</button>
     <span class="daemon-badge offline" id="daemon-badge">
       <span class="indicator"></span> <span id="daemon-text">Offline</span>
     </span>
@@ -865,6 +1141,17 @@ const dashboardHTML = `<!DOCTYPE html>
   <h2 class="section-header collapsed" id="config-header" onclick="toggleConfig()">Configuration <span class="chevron">&#x25BC;</span></h2>
   <div class="info-panel" id="config-panel" style="display:none"></div>
 </section>
+
+<div class="modal-overlay" id="restart-modal">
+  <div class="modal">
+    <h3 id="modal-title">Restarting toad...</h3>
+    <div class="modal-status" id="modal-status">Waiting for in-flight work to finish</div>
+    <div class="modal-runs" id="modal-runs"></div>
+    <div class="modal-footer">
+      <span class="refresh-info" id="modal-elapsed"></span>
+    </div>
+  </div>
+</div>
 
 <script>
 const MAX_VISIBLE = 5;
@@ -974,11 +1261,43 @@ async function refresh() {
 
     // Update available indicator
     const updateEl = document.getElementById('update-badge');
+    const btnUpdate = document.getElementById('btn-update');
     if (dm.update_available && dm.latest_version) {
       updateEl.textContent = 'v' + dm.latest_version + ' available';
       updateEl.style.display = '';
+      btnUpdate.style.display = '';
     } else {
       updateEl.style.display = 'none';
+      btnUpdate.style.display = 'none';
+    }
+
+    // Sync auto-update toggle
+    const autoCb = document.getElementById('auto-update-cb');
+    const autoLabel = document.getElementById('auto-update-toggle');
+    if (d.auto_update !== autoCb.checked) {
+      autoCb.checked = d.auto_update;
+    }
+    if (d.auto_update) {
+      autoLabel.classList.add('active');
+    } else {
+      autoLabel.classList.remove('active');
+    }
+
+    // Version mismatch between daemon and dashboard binary
+    const mismatchEl = document.getElementById('version-mismatch');
+    if (dm.running && dm.daemon_version && dm.version && dm.daemon_version !== dm.version) {
+      mismatchEl.textContent = 'daemon: v' + dm.daemon_version + ' / dashboard: v' + dm.version;
+      mismatchEl.style.display = '';
+    } else {
+      mismatchEl.style.display = 'none';
+    }
+
+    // Disable restart button if daemon offline or already draining
+    document.getElementById('btn-restart').disabled = !dm.running || dm.draining;
+
+    // Update restart modal if draining
+    if (restartModalOpen) {
+      updateRestartModal(dm, d.active || [], now);
     }
 
     // Integrations pills
@@ -1265,6 +1584,167 @@ async function refresh() {
     const bar = document.getElementById('error-bar');
     bar.textContent = 'Failed to fetch data: ' + e.message;
     bar.style.display = 'block';
+  }
+}
+
+let restartModalOpen = false;
+let restartStartedAt = 0;
+let restartOrigPID = 0;
+
+function showRestartModal(title) {
+  restartModalOpen = true;
+  restartStartedAt = Date.now();
+  document.getElementById('modal-title').textContent = title;
+  document.getElementById('modal-status').textContent = 'Sending restart signal...';
+  document.getElementById('modal-runs').innerHTML = '';
+  document.getElementById('modal-elapsed').textContent = '';
+  document.getElementById('restart-modal').classList.add('visible');
+}
+
+function hideRestartModal() {
+  restartModalOpen = false;
+  document.getElementById('restart-modal').classList.remove('visible');
+  // Reset button states
+  const btn = document.getElementById('btn-restart');
+  btn.disabled = false;
+  btn.textContent = 'Restart';
+}
+
+function updateRestartModal(dm, active, now) {
+  const elapsed = Math.round((Date.now() - restartStartedAt) / 1000);
+  document.getElementById('modal-elapsed').textContent = fmtDuration(elapsed) + ' elapsed';
+
+  if (!dm.running) {
+    if (elapsed > 120) {
+      // Daemon hasn't come back after 2 minutes — something went wrong
+      document.getElementById('modal-status').textContent = 'Daemon did not come back online';
+      document.getElementById('modal-runs').innerHTML =
+        '<div style="text-align:center;padding:12px;color:var(--red)">&#x2717; Restart may have failed. Check logs or start toad manually.</div>';
+      document.getElementById('modal-elapsed').innerHTML =
+        '<button class="action-btn" onclick="hideRestartModal()">Dismiss</button>';
+      return;
+    }
+    // Daemon went offline — either restarting or exec'd the new binary
+    document.getElementById('modal-status').textContent = 'Daemon is restarting...';
+    document.getElementById('modal-runs').innerHTML =
+      '<div style="text-align:center;padding:12px;color:var(--amber)"><span class="spinner" style="display:inline-block;width:14px;height:14px;border:2px solid transparent;border-top-color:var(--amber);border-radius:50%;animation:spin 0.8s linear infinite"></span> Waiting for daemon to come back online</div>';
+    return;
+  }
+
+  if (dm.running && !dm.draining && restartOrigPID && dm.pid !== restartOrigPID) {
+    // New PID means restart completed
+    document.getElementById('modal-status').textContent = 'Restart complete!';
+    document.getElementById('modal-runs').innerHTML =
+      '<div style="text-align:center;padding:12px;color:var(--green)">&#x2714; Daemon restarted (PID ' + dm.pid + ')</div>';
+    setTimeout(hideRestartModal, 2000);
+    return;
+  }
+
+  if (dm.draining) {
+    if (active.length === 0) {
+      document.getElementById('modal-status').textContent = 'No more in-flight work. Restarting binary...';
+      document.getElementById('modal-runs').innerHTML = '';
+    } else {
+      document.getElementById('modal-status').textContent =
+        'Waiting for ' + active.length + ' in-flight ' + (active.length === 1 ? 'task' : 'tasks') + ' to finish';
+      let html = '';
+      for (const r of active) {
+        const dur = now - r.started_at;
+        html += '<div class="modal-run">'
+          + statusBadge(r.status, true)
+          + '<span class="run-task">' + esc(r.task || r.branch) + '</span>'
+          + '<span class="run-duration">' + fmtDuration(dur) + '</span>'
+          + '</div>';
+      }
+      document.getElementById('modal-runs').innerHTML = html;
+    }
+  }
+}
+
+async function checkForUpdate() {
+  const btn = document.getElementById('btn-check-update');
+  btn.disabled = true;
+  btn.textContent = 'Checking...';
+  try {
+    const resp = await fetch('/api/check-update');
+    const d = await resp.json();
+    if (d.available) {
+      btn.textContent = 'v' + d.latest + ' available!';
+    } else {
+      btn.textContent = 'Up to date';
+    }
+    refresh();
+  } catch (e) {
+    btn.textContent = 'Error';
+  }
+  setTimeout(() => { btn.disabled = false; btn.textContent = 'Check updates'; }, 3000);
+}
+
+async function doUpdate() {
+  const btn = document.getElementById('btn-update');
+  btn.disabled = true;
+  btn.textContent = 'Updating...';
+  try {
+    const resp = await fetch('/api/update');
+    const d = await resp.json();
+    if (d.status === 'started' || d.status === 'running') {
+      btn.textContent = 'Installing...';
+      const poll = setInterval(async () => {
+        const cr = await fetch('/api/check-update');
+        const cd = await cr.json();
+        if (!cd.available) {
+          clearInterval(poll);
+          btn.textContent = 'Updated!';
+          btn.disabled = false;
+          refresh();
+          setTimeout(() => { btn.style.display = 'none'; }, 2000);
+        }
+      }, 5000);
+      setTimeout(() => { clearInterval(poll); btn.disabled = false; btn.textContent = 'Update'; }, 120000);
+    }
+  } catch (e) {
+    btn.textContent = 'Error';
+    setTimeout(() => { btn.disabled = false; btn.textContent = 'Update'; }, 3000);
+  }
+}
+
+async function triggerRestart(title) {
+  showRestartModal(title);
+  try {
+    const resp = await fetch('/api/restart');
+    const d = await resp.json();
+    if (d.error) {
+      document.getElementById('modal-status').textContent = 'Error: ' + d.error;
+      setTimeout(hideRestartModal, 3000);
+      return;
+    }
+    restartOrigPID = d.pid || 0;
+    document.getElementById('modal-status').textContent = 'Draining in-flight work...';
+  } catch (e) {
+    document.getElementById('modal-status').textContent = 'Failed to send restart signal';
+    setTimeout(hideRestartModal, 3000);
+  }
+}
+
+async function doRestart() {
+  if (!confirm('Restart toad daemon? It will finish all in-flight work before restarting.')) return;
+  document.getElementById('btn-restart').disabled = true;
+  document.getElementById('btn-restart').textContent = 'Restarting...';
+  await triggerRestart('Restarting toad...');
+}
+
+async function toggleAutoUpdate(enabled) {
+  try {
+    await fetch('/api/auto-update?enabled=' + (enabled ? '1' : '0'), { method: 'POST' });
+    const label = document.getElementById('auto-update-toggle');
+    if (enabled) {
+      label.classList.add('active');
+    } else {
+      label.classList.remove('active');
+    }
+  } catch (e) {
+    // Revert checkbox on error
+    document.getElementById('auto-update-cb').checked = !enabled;
   }
 }
 

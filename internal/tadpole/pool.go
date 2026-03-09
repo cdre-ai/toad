@@ -12,6 +12,9 @@ type Pool struct {
 	sem    chan struct{}
 	runner *Runner
 	wg     sync.WaitGroup
+
+	mu      sync.Mutex
+	cancels []context.CancelFunc // cancel funcs for running tadpoles
 }
 
 // NewPool creates a tadpole pool with the given semaphore and runner.
@@ -29,17 +32,28 @@ func (p *Pool) Spawn(ctx context.Context, task Task) error {
 		return ctx.Err()
 	}
 
+	// Detach from the parent context so running tadpoles aren't killed
+	// when the signal context cancels (shutdown/restart). Each tadpole
+	// gets its own cancel func so Shutdown can force-stop them after
+	// the grace period expires.
+	execCtx, cancel := context.WithCancel(context.WithoutCancel(ctx))
+
+	p.mu.Lock()
+	p.cancels = append(p.cancels, cancel)
+	p.mu.Unlock()
+
 	p.wg.Add(1)
 	go func() {
 		defer p.wg.Done()
 		defer func() { <-p.sem }()
+		defer cancel()
 		defer func() {
 			if r := recover(); r != nil {
 				slog.Error("tadpole panicked", "error", r, "task", task.Summary)
 			}
 		}()
 
-		if err := p.runner.Execute(ctx, task); err != nil {
+		if err := p.runner.Execute(execCtx, task); err != nil {
 			slog.Error("tadpole failed", "error", err, "task", task.Summary)
 		}
 	}()
@@ -47,16 +61,18 @@ func (p *Pool) Spawn(ctx context.Context, task Task) error {
 	return nil
 }
 
-// Shutdown waits for all running tadpoles to finish with a 30-second grace period.
-func (p *Pool) Shutdown(ctx context.Context) {
-	slog.Info("shutting down tadpole pool, waiting for active runs...")
+// Shutdown waits for all running tadpoles to finish with a grace period.
+// Pass a longer grace period for restart (where you want work to complete)
+// vs a short one for hard shutdown. After the grace period, remaining
+// tadpoles are forcefully canceled.
+func (p *Pool) Shutdown(grace time.Duration) {
+	slog.Info("shutting down tadpole pool, waiting for active runs...", "grace", grace)
 	done := make(chan struct{})
 	go func() {
 		p.wg.Wait()
 		close(done)
 	}()
 
-	grace := 30 * time.Second
 	timer := time.NewTimer(grace)
 	defer timer.Stop()
 
@@ -64,8 +80,18 @@ func (p *Pool) Shutdown(ctx context.Context) {
 	case <-done:
 		slog.Info("all tadpoles finished")
 	case <-timer.C:
-		slog.Warn("tadpole shutdown timed out after grace period", "grace", grace)
-	case <-ctx.Done():
-		slog.Warn("tadpole shutdown canceled")
+		slog.Warn("tadpole shutdown timed out, canceling remaining runs", "grace", grace)
+		p.mu.Lock()
+		for _, cancel := range p.cancels {
+			cancel()
+		}
+		p.mu.Unlock()
+		// Give canceled tadpoles a moment to clean up
+		select {
+		case <-done:
+			slog.Info("all tadpoles finished after cancel")
+		case <-time.After(10 * time.Second):
+			slog.Warn("some tadpoles did not exit after cancel")
+		}
 	}
 }
