@@ -457,40 +457,67 @@ func (g *GitHubProvider) ExtractRunID(detailsURL string) string {
 	return rest
 }
 
-// GetFileContributors returns up to maxTotal unique GitHub logins who recently
-// committed to any of the given file paths, excluding the provided bot usernames.
-func GetFileContributors(ctx context.Context, repoPath string, files []string, botLogins map[string]bool, maxPerFile int) []string {
-	const maxTotal = 5
-	seen := make(map[string]bool)
+// GetFileContributors returns up to maxTotal unique author names who recently
+// committed to any of the given file paths, excluding bot names.
+// Uses a single git log invocation across all files to avoid per-file network round-trips.
+func GetFileContributors(ctx context.Context, repoPath string, files []string, botNames map[string]bool, maxTotal int) []string {
+	if len(files) == 0 {
+		return nil
+	}
 
-	for _, file := range files {
-		if len(seen) >= maxTotal {
-			break
-		}
-		endpoint := fmt.Sprintf("repos/{owner}/{repo}/commits?path=%s&per_page=%d", file, maxPerFile)
-		cmd := exec.CommandContext(ctx, "gh", "api", endpoint, "--jq", ".[].author.login")
-		cmd.Dir = repoPath
-		out, err := cmd.Output()
-		if err != nil {
-			slog.Debug("GetFileContributors: gh api failed", "file", file, "error", err)
+	args := []string{"log", "--format=%an", "--since=6 months ago", "--"}
+	args = append(args, files...)
+	cmd := exec.CommandContext(ctx, "git", args...)
+	cmd.Dir = repoPath
+	out, err := cmd.Output()
+	if err != nil {
+		slog.Debug("GetFileContributors: git log failed", "error", err)
+		return nil
+	}
+
+	counts := make(map[string]int)
+	for _, name := range strings.Split(strings.TrimSpace(string(out)), "\n") {
+		name = strings.TrimSpace(name)
+		if name == "" {
 			continue
 		}
-		for _, login := range strings.Split(strings.TrimSpace(string(out)), "\n") {
-			login = strings.TrimSpace(login)
-			if login == "" || login == "null" || botLogins[login] {
-				continue
-			}
-			seen[login] = true
-			if len(seen) >= maxTotal {
+		lower := strings.ToLower(name)
+		if strings.Contains(lower, "bot") {
+			continue
+		}
+		skip := false
+		for bot := range botNames {
+			if strings.EqualFold(name, bot) {
+				skip = true
 				break
 			}
 		}
+		if !skip {
+			counts[name]++
+		}
 	}
 
-	result := make([]string, 0, len(seen))
-	for login := range seen {
-		result = append(result, login)
+	type nameCount struct {
+		name  string
+		count int
 	}
-	sort.Strings(result)
+	sorted := make([]nameCount, 0, len(counts))
+	for name, count := range counts {
+		sorted = append(sorted, nameCount{name, count})
+	}
+	sort.Slice(sorted, func(i, j int) bool {
+		if sorted[i].count != sorted[j].count {
+			return sorted[i].count > sorted[j].count
+		}
+		return sorted[i].name < sorted[j].name
+	})
+
+	result := make([]string, 0, maxTotal)
+	for _, nc := range sorted {
+		if len(result) >= maxTotal {
+			break
+		}
+		result = append(result, nc.name)
+	}
 	return result
 }

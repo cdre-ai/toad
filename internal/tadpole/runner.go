@@ -368,8 +368,8 @@ func (r *Runner) ship(ctx context.Context, vcsProvider vcs.Provider, worktreePat
 			for _, u := range r.cfg.VCS.BotUsernames {
 				botSet[u] = true
 			}
-			if reviewers := vcs.GetFileContributors(ctx, worktreePath, changedFiles, botSet, 5); len(reviewers) > 0 {
-				reviewersSection = fmt.Sprintf("**Suggested reviewers** (based on recent file history): @%s\n\n", strings.Join(reviewers, ", @"))
+			if contributors := vcs.GetFileContributors(ctx, worktreePath, changedFiles, botSet, 5); len(contributors) > 0 {
+				reviewersSection = fmt.Sprintf("**Suggested reviewers** (based on recent file history): %s\n\n", strings.Join(contributors, ", "))
 			}
 		} else {
 			slog.Debug("failed to get changed files for reviewer lookup", "error", changedErr)
