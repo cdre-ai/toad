@@ -118,6 +118,11 @@ type apiOpportunity struct {
 	CreatedAt     int64   `json:"created_at"`
 }
 
+const (
+	pillEnabled  = "enabled"
+	pillDisabled = "disabled"
+)
+
 type apiIntegration struct {
 	Name   string `json:"name"`
 	Status string `json:"status"` // "enabled", "disabled", "dry-run", "active", "inactive"
@@ -180,6 +185,9 @@ type apiConfig struct {
 	DigestDryRun   bool            `json:"digest_dry_run"`
 	DigestInterval int             `json:"digest_interval_min,omitempty"`
 	DigestMaxSpawn int             `json:"digest_max_spawn_hour,omitempty"`
+	MCPEnabled     bool            `json:"mcp_enabled"`
+	MCPHost        string          `json:"mcp_host,omitempty"`
+	MCPPort        int             `json:"mcp_port,omitempty"`
 }
 
 type apiCCUsage struct {
@@ -291,15 +299,15 @@ func apiDataHandler(db *state.DB, cfg *config.Config) http.HandlerFunc {
 					digestInt.Status = "dry-run"
 					digestInt.Detail = "Dry-run"
 				} else {
-					digestInt.Status = "enabled"
+					digestInt.Status = pillEnabled
 					digestInt.Detail = "Enabled"
 				}
 			} else {
-				digestInt.Status = "disabled"
+				digestInt.Status = pillDisabled
 				digestInt.Detail = "Disabled"
 			}
 		} else {
-			digestInt.Status = "disabled"
+			digestInt.Status = pillDisabled
 			digestInt.Detail = "Disabled"
 		}
 		integrations = append(integrations, digestInt)
@@ -307,7 +315,7 @@ func apiDataHandler(db *state.DB, cfg *config.Config) http.HandlerFunc {
 		// Issue Tracker
 		issueInt := apiIntegration{Name: "Issue Tracker"}
 		if cfg != nil && cfg.IssueTracker.Enabled {
-			issueInt.Status = "enabled"
+			issueInt.Status = pillEnabled
 			provider := cfg.IssueTracker.Provider
 			if provider == "" {
 				provider = "Linear"
@@ -318,15 +326,26 @@ func apiDataHandler(db *state.DB, cfg *config.Config) http.HandlerFunc {
 			}
 			issueInt.Detail = provider
 		} else {
-			issueInt.Status = "disabled"
+			issueInt.Status = pillDisabled
 			issueInt.Detail = "Disabled"
 		}
 		integrations = append(integrations, issueInt)
 
+		// MCP Server
+		mcpInt := apiIntegration{Name: "MCP Server"}
+		if cfg != nil && cfg.MCP.Enabled {
+			mcpInt.Status = pillEnabled
+			mcpInt.Detail = fmt.Sprintf("%s:%d", cfg.MCP.Host, cfg.MCP.Port)
+		} else {
+			mcpInt.Status = pillDisabled
+			mcpInt.Detail = "Disabled"
+		}
+		integrations = append(integrations, mcpInt)
+
 		// VCS Reviewer
 		reviewerInt := apiIntegration{Name: resp.PRNoun + " Reviewer"}
 		if daemon.Running {
-			reviewerInt.Status = "enabled"
+			reviewerInt.Status = pillEnabled
 			watchCount := len(watches)
 			if watchCount > 0 {
 				reviewerInt.Detail = fmt.Sprintf("Active (%d watching)", watchCount)
@@ -334,7 +353,7 @@ func apiDataHandler(db *state.DB, cfg *config.Config) http.HandlerFunc {
 				reviewerInt.Detail = "Active"
 			}
 		} else {
-			reviewerInt.Status = "disabled"
+			reviewerInt.Status = pillDisabled
 			reviewerInt.Detail = "Inactive"
 		}
 		integrations = append(integrations, reviewerInt)
@@ -424,6 +443,11 @@ func apiDataHandler(db *state.DB, cfg *config.Config) http.HandlerFunc {
 			if cfg.Digest.Enabled {
 				ac.DigestInterval = cfg.Digest.BatchMinutes
 				ac.DigestMaxSpawn = cfg.Digest.MaxAutoSpawnHour
+			}
+			ac.MCPEnabled = cfg.MCP.Enabled
+			if cfg.MCP.Enabled {
+				ac.MCPHost = cfg.MCP.Host
+				ac.MCPPort = cfg.MCP.Port
 			}
 			resp.Config = ac
 		}
@@ -1703,6 +1727,9 @@ async function refresh() {
       if (cfg.digest_enabled) {
         html += '<div class="info-row"><span class="lbl">Digest interval</span><span class="val">' + cfg.digest_interval_min + 'm</span></div>';
         html += '<div class="info-row"><span class="lbl">Digest max spawn/hr</span><span class="val">' + cfg.digest_max_spawn_hour + '</span></div>';
+      }
+      if (cfg.mcp_enabled) {
+        html += '<div class="info-row"><span class="lbl">MCP endpoint</span><span class="val mono">' + esc(cfg.mcp_host) + ':' + cfg.mcp_port + '</span></div>';
       }
       document.getElementById('config-panel').innerHTML = html;
       document.getElementById('config-panel').style.display = configExpanded ? '' : 'none';

@@ -166,18 +166,26 @@ func (h *SlashCommandHandler) handleMCPConnect(cmd slack.SlashCommand) {
 
 	slog.Info("MCP token issued", "user", cmd.UserName, "role", role)
 
-	snippet := fmt.Sprintf(`{
+	endpoint := fmt.Sprintf("%s://%s:%d/mcp", h.mcpScheme(), h.cfg.Host, h.cfg.Port)
+
+	desktopSnippet := fmt.Sprintf(`{
   "mcpServers": {
     "toad": {
-      "url": "%s://%s:%d/mcp",
+      "url": "%s",
       "headers": {
         "Authorization": "Bearer %s"
       }
     }
   }
-}`, h.mcpScheme(), h.cfg.Host, h.cfg.Port, token)
+}`, endpoint, token)
 
-	text := fmt.Sprintf("Your MCP token has been created (role: *%s*).\n\nToken:\n```\n%s\n```\n\nAdd this to your Claude Desktop config:\n```\n%s\n```\n\nKeep this token secret — it grants access to toad on your behalf.", role, token, snippet)
+	codeCmd := fmt.Sprintf("claude mcp add --transport http -H \"Authorization: Bearer %s\" toad %s", token, endpoint)
+
+	text := fmt.Sprintf("Your MCP token has been created (role: *%s*).\n\n"+
+		"*Claude Code* — run this in your terminal:\n```\n%s\n```\n\n"+
+		"*Claude Desktop* — add this to your config (`claude_desktop_config.json`):\n```\n%s\n```\n\n"+
+		":warning: Keep this token secret — it grants access to toad on your behalf.",
+		role, codeCmd, desktopSnippet)
 	if h.cfg.Message != "" {
 		text += "\n\n" + h.cfg.Message
 	}
