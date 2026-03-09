@@ -829,16 +829,26 @@ const dashboardHTML = `<!DOCTYPE html>
   .action-btn:disabled { opacity: 0.5; cursor: not-allowed; }
   .action-btn.danger { border-color: var(--amber); color: var(--amber); }
   .action-btn.danger:hover { background: rgba(255,193,7,0.1); }
-  .toggle-label {
-    display: inline-flex; align-items: center; gap: 6px;
-    font-size: 12px; cursor: pointer; user-select: none;
-    padding: 4px 10px; border-radius: 6px;
-    border: 1px solid var(--border); background: var(--surface);
-    color: var(--dim); transition: border-color 0.15s;
+  .toggle-wrap {
+    display: inline-flex; align-items: center; gap: 8px;
+    cursor: pointer; user-select: none;
   }
-  .toggle-label:hover { border-color: var(--accent); }
-  .toggle-label input[type="checkbox"] { accent-color: var(--green); }
-  .toggle-label.active { color: var(--green); border-color: var(--green); }
+  .toggle-track {
+    position: relative; width: 32px; height: 18px;
+    background: #3a3a3e; border-radius: 9px;
+    transition: background 0.15s;
+  }
+  .toggle-thumb {
+    position: absolute; top: 2px; left: 2px;
+    width: 14px; height: 14px; border-radius: 50%;
+    background: #8a8a8f; transition: transform 0.15s, background 0.15s;
+  }
+  .toggle-wrap.active .toggle-track { background: rgba(76,175,80,0.25); }
+  .toggle-wrap.active .toggle-thumb { transform: translateX(14px); background: var(--green); }
+  .toggle-wrap .toggle-text { font-size: 12px; font-weight: 500; color: #8a8a8f; transition: color 0.15s; }
+  .toggle-wrap.active .toggle-text { color: var(--green); }
+  .toggle-wrap:hover .toggle-text { color: #aaa; }
+  .toggle-wrap.active:hover .toggle-text { color: var(--green); }
   .version-mismatch {
     font-size: 11px; color: var(--amber);
     padding: 2px 8px; border-radius: 10px;
@@ -1058,12 +1068,12 @@ const dashboardHTML = `<!DOCTYPE html>
   <div class="header-right">
     <span class="update-badge" id="update-badge"></span>
     <span id="version-mismatch" class="version-mismatch" style="display:none"></span>
+    <div class="toggle-wrap" id="auto-update-toggle" onclick="toggleAutoUpdate()" title="Automatically update and restart when new versions are available">
+      <span class="toggle-track"><span class="toggle-thumb"></span></span>
+      <span class="toggle-text">Auto update</span>
+    </div>
     <button class="action-btn" id="btn-check-update" onclick="checkForUpdate()" title="Check for updates">Check updates</button>
     <button class="action-btn" id="btn-update" onclick="doUpdate()" style="display:none" title="Download and install latest version">Update</button>
-    <label class="toggle-label" id="auto-update-toggle" title="Automatically update and restart when new versions are available">
-      <input type="checkbox" id="auto-update-cb" onchange="toggleAutoUpdate(this.checked)">
-      <span class="toggle-text">Auto update</span>
-    </label>
     <button class="action-btn danger" id="btn-restart" onclick="doRestart()" title="Gracefully restart daemon (waits for in-flight work)">Restart</button>
     <span class="daemon-badge offline" id="daemon-badge">
       <span class="indicator"></span> <span id="daemon-text">Offline</span>
@@ -1272,15 +1282,11 @@ async function refresh() {
     }
 
     // Sync auto-update toggle
-    const autoCb = document.getElementById('auto-update-cb');
-    const autoLabel = document.getElementById('auto-update-toggle');
-    if (d.auto_update !== autoCb.checked) {
-      autoCb.checked = d.auto_update;
-    }
+    const autoToggle = document.getElementById('auto-update-toggle');
     if (d.auto_update) {
-      autoLabel.classList.add('active');
+      autoToggle.classList.add('active');
     } else {
-      autoLabel.classList.remove('active');
+      autoToggle.classList.remove('active');
     }
 
     // Version mismatch between daemon and dashboard binary
@@ -1631,13 +1637,16 @@ function updateRestartModal(dm, active, now) {
     return;
   }
 
-  if (dm.running && !dm.draining && restartOrigPID && dm.pid !== restartOrigPID) {
-    // New PID means restart completed
-    document.getElementById('modal-status').textContent = 'Restart complete!';
-    document.getElementById('modal-runs').innerHTML =
-      '<div style="text-align:center;padding:12px;color:var(--green)">&#x2714; Daemon restarted (PID ' + dm.pid + ')</div>';
-    setTimeout(hideRestartModal, 2000);
-    return;
+  if (dm.running && !dm.draining && restartOrigPID) {
+    // Detect restart: PID changed, or uptime reset (syscall.Exec keeps same PID)
+    const restarted = dm.pid !== restartOrigPID || (dm.uptime_s != null && dm.uptime_s < elapsed);
+    if (restarted) {
+      document.getElementById('modal-status').textContent = 'Restart complete!';
+      document.getElementById('modal-runs').innerHTML =
+        '<div style="text-align:center;padding:12px;color:var(--green)">&#x2714; Daemon restarted (PID ' + dm.pid + ')</div>';
+      setTimeout(hideRestartModal, 2000);
+      return;
+    }
   }
 
   if (dm.draining) {
@@ -1727,24 +1736,19 @@ async function triggerRestart(title) {
 }
 
 async function doRestart() {
-  if (!confirm('Restart toad daemon? It will finish all in-flight work before restarting.')) return;
   document.getElementById('btn-restart').disabled = true;
   document.getElementById('btn-restart').textContent = 'Restarting...';
   await triggerRestart('Restarting toad...');
 }
 
-async function toggleAutoUpdate(enabled) {
+async function toggleAutoUpdate() {
+  const toggle = document.getElementById('auto-update-toggle');
+  const enabling = !toggle.classList.contains('active');
   try {
-    await fetch('/api/auto-update?enabled=' + (enabled ? '1' : '0'), { method: 'POST' });
-    const label = document.getElementById('auto-update-toggle');
-    if (enabled) {
-      label.classList.add('active');
-    } else {
-      label.classList.remove('active');
-    }
+    await fetch('/api/auto-update?enabled=' + (enabling ? '1' : '0'), { method: 'POST' });
+    toggle.classList.toggle('active');
   } catch (e) {
-    // Revert checkbox on error
-    document.getElementById('auto-update-cb').checked = !enabled;
+    // silently fail, next refresh will sync state
   }
 }
 
