@@ -195,7 +195,7 @@ func runDaemon(cmd *cobra.Command, args []string) error {
 	}
 
 	// Always wire up slash command handler (status/help work without MCP)
-	slashCmds := islack.NewSlashCommandHandler(stateDB, slackClient.API(), cfg.MCP, agentProvider, cfg.Triage.Model)
+	slashCmds := islack.NewSlashCommandHandler(stateDB, slackClient.API(), cfg.MCP)
 	slackClient.SetMCPHandler(slashCmds)
 
 	// Initialize digest engine (Toad King) if enabled

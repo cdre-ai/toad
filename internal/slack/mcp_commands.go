@@ -1,38 +1,33 @@
 package slack
 
 import (
-	"context"
 	"crypto/rand"
 	"encoding/hex"
 	"fmt"
 	"log/slog"
+	"math/big"
 	"strings"
 	"time"
 
 	"github.com/slack-go/slack"
 
-	"github.com/scaler-tech/toad/internal/agent"
 	"github.com/scaler-tech/toad/internal/config"
 	"github.com/scaler-tech/toad/internal/state"
 )
 
 // SlashCommandHandler processes /toad slash commands.
 type SlashCommandHandler struct {
-	db    *state.DB
-	api   *slack.Client
-	cfg   config.MCPConfig
-	agent agent.Provider
-	model string
+	db  *state.DB
+	api *slack.Client
+	cfg config.MCPConfig
 }
 
 // NewSlashCommandHandler creates a new handler for /toad commands.
-func NewSlashCommandHandler(db *state.DB, api *slack.Client, cfg config.MCPConfig, ag agent.Provider, model string) *SlashCommandHandler {
+func NewSlashCommandHandler(db *state.DB, api *slack.Client, cfg config.MCPConfig) *SlashCommandHandler {
 	return &SlashCommandHandler{
-		db:    db,
-		api:   api,
-		cfg:   cfg,
-		agent: ag,
-		model: model,
+		db:  db,
+		api: api,
+		cfg: cfg,
 	}
 }
 
@@ -245,29 +240,96 @@ func (h *SlashCommandHandler) handleMCPHelp(cmd slack.SlashCommand) {
 
 // --- /toad joke ---
 
+//nolint:lll // joke lines are naturally long
+var frogJokes = []string{
+	// Classic puns
+	"What do frogs do with paper? Rip-it. :frog:",
+	"What kind of shoes do frogs wear? Open toad sandals. :sandal:",
+	"Why are frogs so happy? They eat whatever bugs them. :bug:",
+	"What did the frog order at the restaurant? French flies. :french_fries:",
+	"What do you call a frog with no legs? Unhoppy. :disappointed:",
+	"Why did the frog take the bus to work? His car got toad. :bus:",
+	"What kind of music do frogs listen to? Hip hop. :headphones:",
+	"What happens when two frogs collide? They get tongue tied. :tongue:",
+	"What do frogs drink? Croaka-Cola. :cup_with_straw:",
+	"What do you call a girl with a frog on her head? Lily. :lily_pad:",
+	"What's a frog's favorite candy? Lollihops. :lollipop:",
+	"What's a toad's favorite ballet? Swamp Lake. :dancer:",
+	"What do you get when you cross a frog with a rabbit? A bunny ribbit. :rabbit:",
+
+	// Workplace humor
+	"Why did the toad become a programmer? He was great at debugging. :computer:",
+	"What's a frog's favorite version control system? Git ribbit. :git:",
+	"Why do frogs make great QA testers? They're always finding bugs. :lady_beetle:",
+	"How do frogs deploy code? They push to the lily pad. :rocket:",
+	"What's a frog's favorite IDE feature? Auto-croak-plete. :keyboard:",
+	"Why was the frog fired from the help desk? He kept telling people to restart their lily pads. :telephone_receiver:",
+	"What do you call a frog who works in IT? A tech-toad. :technologist:",
+	"Why don't frogs use JIRA? They prefer kanban — it's more agile. :clipboard:",
+	"How does a frog review a pull request? One hop at a time. :eyes:",
+
+	// Nature & lifestyle
+	"What did the frog say about the book? Reddit. :book:",
+	"What's a frog's favorite game? Leapfrog — they take it very seriously. :video_game:",
+	"Why did the frog go to the hospital? He needed a hopperation. :hospital:",
+	"What do frogs wear in summer? Jumpsuits. :shirt:",
+	"What's a frog's favorite year? A leap year. :calendar:",
+	"Why don't frogs ever get lost? They always know where to find the nearest pad. :compass:",
+	"What do you call a frog spy? A croak-and-dagger agent. :male_detective:",
+	"What's a toad's favorite TV show? Game of Ponds. :tv:",
+	"Why did the frog become a lifeguard? He was already outstanding in his field — the swamp. :ocean:",
+	"What do frogs do when they're sad? They drown their sorrows in the pond. :sweat_drops:",
+
+	// Philosophy & wisdom
+	"A frog walks into a library and says 'reddit, reddit, reddit'. The librarian says 'you've been here three times today'. :books:",
+	"What did the zen frog say? Time's fun when you're having flies. :fly:",
+	"Why did the philosophical frog sit on the log? To ponder the meaning of lily. :thought_balloon:",
+
+	// Relationship & social
+	"What did the frog say to his date? You make my heart leap. :heart:",
+	"What do you call a frog who's always complaining? A grumpy toad. :rage:",
+	"Why did the toad break up with the mushroom? There wasn't enough room for both of them on the log. :mushroom:",
+	"What did the father frog say to his son? Time flies when you're catching them. :watch:",
+	"How do frogs communicate over long distances? With a tele-croak. :phone:",
+
+	// Food & drink
+	"What's a frog's favorite hot drink? Croako. :coffee:",
+	"What do frogs eat with their burgers? Flies and a shake. :hamburger:",
+	"What's a toad's favorite snack? Flies and chips. :fries:",
+	"What beer do frogs prefer? Bud Weis-ribbit. :beers:",
+
+	// Science & education
+	"Why are frogs so good at math? They love log-arithms. :abacus:",
+	"What subject do frogs study at school? Biology — it's the only class where dissecting the teacher is acceptable. :microscope:",
+	"Why did the tadpole feel lonely? Because he was going through a phase. :crescent_moon:",
+	"What's a frog's blood type? Bee positive. :bee:",
+	"Why did the frog go to night school? He wanted a toad-al education. :mortar_board:",
+
+	// Meta & self-aware
+	"I tried to write a frog joke but it didn't work. It just wasn't ribbiting enough. :writing_hand:",
+	"What did the toad say to the other toad after hearing a joke? That was ribbiting! :joy:",
+	"Why do frog jokes always work? They just have a certain _je ne sais croak_. :sparkles:",
+	"What's the difference between a frog and a toad? About three product meetings. :memo:",
+	"What's a frog's least favorite day? Fry-day. :grimacing:",
+
+	// Tech & modern
+	"How do frogs keep up with the news? They check the web — they're great at catching things on it. :spider_web:",
+	"What social media do frogs use? TikToad. :iphone:",
+	"What's a frog's WiFi password? Lily-pad-123. :signal_strength:",
+	"Why did the frog's startup fail? Too many bugs in production. :chart_with_downwards_trend:",
+	"What's a frog's favorite cryptocurrency? Dogecoin — just kidding, it's Ribbit-coin. :moneybag:",
+
+	// Seasonal & situational
+	"What do frogs say on New Year's? Hoppy New Year! :tada:",
+	"What do frogs say at Halloween? Warts new? :jack_o_lantern:",
+	"What did the frog wear to the party? A jumpsuit and a bow-toad. :bowtie:",
+	"Why don't frogs play cricket? They're afraid of catching flies out. :cricket_game:",
+	"What do you call a frog in January? A frogsicle. :cold_face:",
+}
+
 func (h *SlashCommandHandler) handleJoke(cmd slack.SlashCommand) {
-	if h.agent == nil {
-		h.post(cmd, "What do frogs do with paper? Rip-it.")
-		return
-	}
-
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-	defer cancel()
-
-	result, err := h.agent.Run(ctx, agent.RunOpts{
-		Prompt: "Tell me a single original joke about frogs, toads, or amphibians. " +
-			"Just the joke, nothing else. No quotes, no attribution, no preamble.",
-		Model:       h.model,
-		MaxTurns:    1,
-		Permissions: agent.PermissionNone,
-	})
-	if err != nil {
-		slog.Error("failed to generate joke", "error", err)
-		h.post(cmd, "Why are frogs so happy? They eat whatever bugs them. :frog:")
-		return
-	}
-
-	h.post(cmd, result.Result)
+	n, _ := rand.Int(rand.Reader, big.NewInt(int64(len(frogJokes))))
+	h.post(cmd, frogJokes[n.Int64()])
 }
 
 // --- /toad help ---
