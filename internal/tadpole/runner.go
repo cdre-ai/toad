@@ -351,10 +351,35 @@ func (r *Runner) ship(ctx context.Context, vcsProvider vcs.Provider, worktreePat
 		issueLine = fmt.Sprintf("%s: %s\n\n", capitalize(task.IssueRef.Provider), task.IssueRef.ID)
 	}
 
+	// Look up suggested reviewers based on changed files (GitHub only, non-fatal)
+	reviewersSection := ""
+	if _, ok := vcsProvider.(*vcs.GitHubProvider); ok {
+		changedFilesCmd := exec.CommandContext(ctx, "git", "diff", "--name-only", "origin/"+defaultBranch+"...HEAD")
+		changedFilesCmd.Dir = worktreePath
+		if changedOut, changedErr := changedFilesCmd.Output(); changedErr == nil {
+			var changedFiles []string
+			for _, f := range strings.Split(strings.TrimSpace(string(changedOut)), "\n") {
+				f = strings.TrimSpace(f)
+				if f != "" {
+					changedFiles = append(changedFiles, f)
+				}
+			}
+			botSet := make(map[string]bool)
+			for _, u := range r.cfg.VCS.BotUsernames {
+				botSet[u] = true
+			}
+			if reviewers := vcs.GetFileContributors(ctx, worktreePath, changedFiles, botSet, 5); len(reviewers) > 0 {
+				reviewersSection = fmt.Sprintf("**Suggested reviewers** (based on recent file history): @%s\n\n", strings.Join(reviewers, ", @"))
+			}
+		} else {
+			slog.Debug("failed to get changed files for reviewer lookup", "error", changedErr)
+		}
+	}
+
 	slackContext := sanitizeForPR(task.Description, 2000)
 
-	body := fmt.Sprintf("## Summary\n\n%s\n\n%s%s_Category: %s | Size: %s_\n\n<details>\n<summary>Slack context</summary>\n\n%s\n\n</details>\n\n---\n:frog: Created by toad tadpole",
-		task.Summary, issueLine, slackLine, task.Category, task.EstSize, slackContext)
+	body := fmt.Sprintf("## Summary\n\n%s\n\n%s%s_Category: %s | Size: %s_\n\n%s<details>\n<summary>Slack context</summary>\n\n%s\n\n</details>\n\n---\n:frog: Created by toad tadpole",
+		task.Summary, issueLine, slackLine, task.Category, task.EstSize, reviewersSection, slackContext)
 	for p, name := range repoPaths {
 		body = strings.ReplaceAll(body, p, "<"+name+">")
 	}

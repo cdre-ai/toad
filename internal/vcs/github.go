@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"log/slog"
 	"os/exec"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -454,4 +455,42 @@ func (g *GitHubProvider) ExtractRunID(detailsURL string) string {
 		return ""
 	}
 	return rest
+}
+
+// GetFileContributors returns up to maxTotal unique GitHub logins who recently
+// committed to any of the given file paths, excluding the provided bot usernames.
+func GetFileContributors(ctx context.Context, repoPath string, files []string, botLogins map[string]bool, maxPerFile int) []string {
+	const maxTotal = 5
+	seen := make(map[string]bool)
+
+	for _, file := range files {
+		if len(seen) >= maxTotal {
+			break
+		}
+		endpoint := fmt.Sprintf("repos/{owner}/{repo}/commits?path=%s&per_page=%d", file, maxPerFile)
+		cmd := exec.CommandContext(ctx, "gh", "api", endpoint, "--jq", ".[].author.login")
+		cmd.Dir = repoPath
+		out, err := cmd.Output()
+		if err != nil {
+			slog.Debug("GetFileContributors: gh api failed", "file", file, "error", err)
+			continue
+		}
+		for _, login := range strings.Split(strings.TrimSpace(string(out)), "\n") {
+			login = strings.TrimSpace(login)
+			if login == "" || login == "null" || botLogins[login] {
+				continue
+			}
+			seen[login] = true
+			if len(seen) >= maxTotal {
+				break
+			}
+		}
+	}
+
+	result := make([]string, 0, len(seen))
+	for login := range seen {
+		result = append(result, login)
+	}
+	sort.Strings(result)
+	return result
 }
