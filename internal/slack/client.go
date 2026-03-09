@@ -57,7 +57,8 @@ type Client struct {
 	seenMu       sync.Mutex
 	replies      map[string]time.Time // toad's own reply timestamps (channel:ts → sent time)
 	repliesMu    sync.Mutex
-	pathScrubber func(string) string // replaces absolute paths with repo-relative
+	pathScrubber func(string) string  // replaces absolute paths with repo-relative
+	mcpHandler   *SlashCommandHandler // handles /toad slash commands
 }
 
 // NewClient creates a new Slack client configured for Socket Mode.
@@ -218,6 +219,11 @@ func (c *Client) inChannel(channelID string) bool {
 // API returns the underlying Slack API client for direct access.
 func (c *Client) API() *slack.Client {
 	return c.api
+}
+
+// SetMCPHandler configures the handler for /toad slash commands.
+func (c *Client) SetMCPHandler(h *SlashCommandHandler) {
+	c.mcpHandler = h
 }
 
 // FetchThreadMessages retrieves all messages in a thread.
@@ -487,6 +493,13 @@ func (c *Client) routeEvent(ctx context.Context, evt socketmode.Event) {
 	case socketmode.EventTypeEventsAPI:
 		c.socket.Ack(*evt.Request)
 		handleEventsAPI(ctx, c, evt)
+	case socketmode.EventTypeSlashCommand:
+		cmd, ok := evt.Data.(slack.SlashCommand)
+		if !ok {
+			return
+		}
+		c.socket.Ack(*evt.Request)
+		handleSlashCommand(c, cmd)
 	case socketmode.EventTypeConnecting:
 		slog.Info("connecting to Slack...")
 	case socketmode.EventTypeConnected:

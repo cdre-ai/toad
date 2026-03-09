@@ -1,7 +1,7 @@
 ---
-allowed-tools: Bash(git add:*), Bash(git status:*), Bash(git commit:*), Bash(git tag:*), Bash(git push:*), Bash(gofmt:*), Bash(go build:*), Bash(go test:*), Bash(go vet:*), Bash(golangci-lint:*)
+allowed-tools: Bash(git add:*), Bash(git status:*), Bash(git commit:*), Bash(git tag:*), Bash(git push:*), Bash(git pull:*), Bash(gofmt:*), Bash(go build:*), Bash(go test:*), Bash(go vet:*), Bash(golangci-lint:*)
 description: Commit, tag, and push a release
-argument-hint: "[commit message]"
+argument-hint: "[pr | commit message]"
 ---
 
 ## Context
@@ -17,7 +17,21 @@ argument-hint: "[commit message]"
 
 Create a release: commit all changes, tag with the next version, and push.
 
-### Steps
+**If the argument is `pr`**, this is a PR-only release (remote changes already merged to main). Follow the **PR flow** below. Otherwise follow the **Normal flow**.
+
+### PR flow (argument = "pr")
+
+1. **Pull latest**: Run `git pull` to get the merged PR changes.
+
+2. **Pre-flight checks**: Run `gofmt -l .`, `go build ./...`, `go test ./...`, `go vet ./...`, and `golangci-lint run ./...`. If any fail, stop and report the issue.
+
+3. **Determine next version**: Look at the latest tag above. Increment the patch version.
+
+4. **Tag and push**: Create the tag and push it: `git tag vX.Y.Z && git push --tags`.
+
+5. **Report**: Output the new version tag and a brief summary of the PR changes (from the commits since the last tag).
+
+### Normal flow (default)
 
 1. **Pre-flight checks**: Run `gofmt -l .`, `go build ./...`, `go test ./...`, `go vet ./...`, and `golangci-lint run ./...`. If any fail, stop and report the issue. Do NOT skip these checks.
 

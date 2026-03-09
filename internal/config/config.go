@@ -21,6 +21,7 @@ type Config struct {
 	VCS          VCSConfig          `yaml:"vcs"`
 	Agent        AgentConfig        `yaml:"agent"`
 	Log          LogConfig          `yaml:"log"`
+	MCP          MCPConfig          `yaml:"mcp"`
 }
 
 type SlackConfig struct {
@@ -124,6 +125,14 @@ type LogConfig struct {
 	File  string `yaml:"file"`
 }
 
+type MCPConfig struct {
+	Enabled bool     `yaml:"enabled"`
+	Host    string   `yaml:"host"`
+	Port    int      `yaml:"port"`
+	Devs    []string `yaml:"devs"`
+	Message string   `yaml:"message"` // optional message included in the connect DM
+}
+
 func defaults() *Config {
 	homeDir, _ := os.UserHomeDir()
 
@@ -176,6 +185,11 @@ func defaults() *Config {
 		Log: LogConfig{
 			Level: "info",
 			File:  filepath.Join(homeDir, ".toad", "toad.log"),
+		},
+		MCP: MCPConfig{
+			Enabled: false,
+			Host:    "localhost",
+			Port:    8099,
 		},
 	}
 }

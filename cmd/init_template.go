@@ -209,6 +209,17 @@ agent:
 log:
   level: "{{ .Log.Level }}"
   # file: "~/.toad/toad.log"    # Default log file location
+
+# ──────────────────────────────────────────────
+# MCP Server — Claude Desktop/Code integration
+# ──────────────────────────────────────────────
+# mcp:
+#   enabled: false               # Enable the MCP server
+#   host: "localhost"            # Hostname for the MCP endpoint
+#   port: 8099                   # Port to listen on
+#   devs:                        # Slack user IDs with dev access (logs tool)
+#     - "U0123456789"
+#   message: ""                  # Optional message included in the connect DM
 `
 
 var configTemplate = template.Must(template.New("config").Parse(yamlTemplate))

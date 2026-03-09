@@ -22,6 +22,7 @@ import (
 	"github.com/scaler-tech/toad/internal/digest"
 	"github.com/scaler-tech/toad/internal/issuetracker"
 	toadlog "github.com/scaler-tech/toad/internal/log"
+	toadmcp "github.com/scaler-tech/toad/internal/mcp"
 	"github.com/scaler-tech/toad/internal/reviewer"
 	"github.com/scaler-tech/toad/internal/ribbit"
 	islack "github.com/scaler-tech/toad/internal/slack"
@@ -177,7 +178,26 @@ func runDaemon(cmd *cobra.Command, args []string) error {
 	// Wire path scrubber — prevents absolute filesystem paths from leaking to Slack
 	slackClient.SetPathScrubber(repoPaths)
 
-	// 9. Initialize digest engine (Toad King) if enabled
+	// 9. Initialize MCP server if enabled (started after context is created below)
+	var mcpSrv *toadmcp.Server
+	if cfg.MCP.Enabled {
+		mcpSrv = toadmcp.New(cfg.MCP, stateDB)
+
+		toadmcp.RegisterLogsTool(mcpSrv.MCPServer(), cfg.Log.File)
+		toadmcp.RegisterAskTool(mcpSrv.MCPServer(), &toadmcp.AskDeps{
+			Ribbit:   ribbitEngine,
+			Triage:   triageEngine,
+			Resolver: resolver,
+			Repos:    cfg.Repos,
+			Sessions: toadmcp.NewSessionStore(),
+			Sem:      ribbitSem,
+		})
+
+		mcpCmds := islack.NewSlashCommandHandler(stateDB, slackClient.API(), cfg.MCP)
+		slackClient.SetMCPHandler(mcpCmds)
+	}
+
+	// Initialize digest engine (Toad King) if enabled
 	var digestEngine *digest.Engine
 	if cfg.Digest.Enabled {
 		digestEngine = digest.New(&cfg.Digest, agentProvider, cfg.Triage.Model,
@@ -244,6 +264,15 @@ func runDaemon(cmd *cobra.Command, args []string) error {
 		"repos", repoNames,
 		"triggers", fmt.Sprintf("emoji=%s keywords=%v", cfg.Slack.Triggers.Emoji, cfg.Slack.Triggers.Keywords),
 	)
+
+	// Start MCP server if enabled
+	if mcpSrv != nil {
+		go func() {
+			if err := mcpSrv.Start(ctx); err != nil {
+				slog.Error("MCP server error", "error", err)
+			}
+		}()
+	}
 
 	// Start PR review watcher
 	go prWatcher.Run(ctx)

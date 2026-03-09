@@ -146,6 +146,18 @@ func migrate(db *sql.DB) error {
 		return err
 	}
 
+	_, err = db.Exec(`CREATE TABLE IF NOT EXISTS mcp_tokens (
+		token TEXT PRIMARY KEY,
+		slack_user_id TEXT NOT NULL,
+		slack_user TEXT NOT NULL,
+		role TEXT NOT NULL DEFAULT 'user',
+		created_at DATETIME NOT NULL,
+		last_used_at DATETIME
+	)`)
+	if err != nil {
+		return fmt.Errorf("creating mcp_tokens table: %w", err)
+	}
+
 	// Add columns for existing databases that predate the investigation gate.
 	// SQLite has no IF NOT EXISTS for ALTER TABLE, so check first.
 	var count int
@@ -871,6 +883,79 @@ func (d *DB) ClearDaemonStats() error {
 	return err
 }
 
+// SaveMCPToken inserts or replaces an MCP token.
+func (d *DB) SaveMCPToken(tok *MCPToken) error {
+	ctx, cancel := dbCtx()
+	defer cancel()
+	_, err := d.db.ExecContext(ctx, `
+		INSERT OR REPLACE INTO mcp_tokens (token, slack_user_id, slack_user, role, created_at, last_used_at)
+		VALUES (?, ?, ?, ?, ?, ?)`,
+		tok.Token, tok.SlackUserID, tok.SlackUser, tok.Role, tok.CreatedAt, tok.LastUsedAt,
+	)
+	return err
+}
+
+// ValidateMCPToken looks up a token and updates its last_used_at timestamp.
+// Returns nil, nil if the token is not found.
+func (d *DB) ValidateMCPToken(token string) (*MCPToken, error) {
+	ctx, cancel := dbCtx()
+	defer cancel()
+
+	var tok MCPToken
+	var lastUsed sql.NullTime
+	err := d.db.QueryRowContext(ctx,
+		"SELECT token, slack_user_id, slack_user, role, created_at, last_used_at FROM mcp_tokens WHERE token = ?",
+		token,
+	).Scan(&tok.Token, &tok.SlackUserID, &tok.SlackUser, &tok.Role, &tok.CreatedAt, &lastUsed)
+	if err == sql.ErrNoRows {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	if lastUsed.Valid {
+		tok.LastUsedAt = lastUsed.Time
+	}
+
+	// Update last_used_at
+	now := time.Now()
+	_, _ = d.db.ExecContext(ctx, "UPDATE mcp_tokens SET last_used_at = ? WHERE token = ?", now, token)
+	tok.LastUsedAt = now
+
+	return &tok, nil
+}
+
+// GetMCPTokenByUser looks up a token by Slack user ID (without updating last_used_at).
+func (d *DB) GetMCPTokenByUser(slackUserID string) (*MCPToken, error) {
+	ctx, cancel := dbCtx()
+	defer cancel()
+
+	var tok MCPToken
+	var lastUsed sql.NullTime
+	err := d.db.QueryRowContext(ctx,
+		"SELECT token, slack_user_id, slack_user, role, created_at, last_used_at FROM mcp_tokens WHERE slack_user_id = ?",
+		slackUserID,
+	).Scan(&tok.Token, &tok.SlackUserID, &tok.SlackUser, &tok.Role, &tok.CreatedAt, &lastUsed)
+	if err == sql.ErrNoRows {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	if lastUsed.Valid {
+		tok.LastUsedAt = lastUsed.Time
+	}
+	return &tok, nil
+}
+
+// RevokeMCPToken deletes all tokens for the given Slack user ID.
+func (d *DB) RevokeMCPToken(slackUserID string) error {
+	ctx, cancel := dbCtx()
+	defer cancel()
+	_, err := d.db.ExecContext(ctx, "DELETE FROM mcp_tokens WHERE slack_user_id = ?", slackUserID)
+	return err
+}
+
 // Close closes the database connection.
 func (d *DB) Close() error {
 	return d.db.Close()
@@ -893,6 +978,16 @@ type PRWatch struct {
 	OriginalSummary     string
 	OriginalDescription string
 	CreatedAt           time.Time
+}
+
+// MCPToken represents an MCP authentication token linked to a Slack user.
+type MCPToken struct {
+	Token       string
+	SlackUserID string
+	SlackUser   string
+	Role        string // "dev" or "user"
+	CreatedAt   time.Time
+	LastUsedAt  time.Time
 }
 
 // ThreadMemory holds cached context for a Slack thread.

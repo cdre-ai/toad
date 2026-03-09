@@ -135,6 +135,20 @@ Toad connects to Slack via Socket Mode, which means it runs as a daemon on your 
    - `message.groups` — messages in private channels
    - `reaction_added` — emoji reactions on messages
 
+### Step 4b: Add slash command (optional, for MCP server)
+
+If you plan to use the MCP server (Claude Desktop/Code integration):
+
+1. Go to **Slash Commands** in the left sidebar
+2. Click **Create New Command**
+3. Set:
+   - **Command:** `/toad`
+   - **Short Description:** `Toad daemon commands`
+   - **Usage Hint:** `mcp connect | mcp revoke | mcp status | mcp ping | status | help`
+4. Click **Save**
+
+Users can then run `/toad mcp connect` to get an MCP token, `/toad mcp status` to check it, `/toad mcp revoke` to invalidate it, and `/toad status` for daemon info.
+
 ### Step 5: Install to workspace
 
 1. Go to **Install App** in the left sidebar
