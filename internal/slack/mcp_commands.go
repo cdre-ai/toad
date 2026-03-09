@@ -1,6 +1,7 @@
 package slack
 
 import (
+	"context"
 	"crypto/rand"
 	"encoding/hex"
 	"fmt"
@@ -10,23 +11,28 @@ import (
 
 	"github.com/slack-go/slack"
 
+	"github.com/scaler-tech/toad/internal/agent"
 	"github.com/scaler-tech/toad/internal/config"
 	"github.com/scaler-tech/toad/internal/state"
 )
 
 // SlashCommandHandler processes /toad slash commands.
 type SlashCommandHandler struct {
-	db  *state.DB
-	api *slack.Client
-	cfg config.MCPConfig
+	db    *state.DB
+	api   *slack.Client
+	cfg   config.MCPConfig
+	agent agent.Provider
+	model string
 }
 
 // NewSlashCommandHandler creates a new handler for /toad commands.
-func NewSlashCommandHandler(db *state.DB, api *slack.Client, cfg config.MCPConfig) *SlashCommandHandler {
+func NewSlashCommandHandler(db *state.DB, api *slack.Client, cfg config.MCPConfig, ag agent.Provider, model string) *SlashCommandHandler {
 	return &SlashCommandHandler{
-		db:  db,
-		api: api,
-		cfg: cfg,
+		db:    db,
+		api:   api,
+		cfg:   cfg,
+		agent: ag,
+		model: model,
 	}
 }
 
@@ -45,6 +51,10 @@ func handleSlashCommand(c *Client, cmd slack.SlashCommand) {
 
 	switch args[0] {
 	case "mcp":
+		if !c.mcpHandler.cfg.Enabled {
+			c.mcpHandler.ephemeral(cmd, "MCP server is not enabled. Add `mcp.enabled: true` to your toad config to use MCP commands.")
+			return
+		}
 		if len(args) < 2 {
 			c.mcpHandler.handleMCPHelp(cmd)
 			return
@@ -63,10 +73,12 @@ func handleSlashCommand(c *Client, cmd slack.SlashCommand) {
 		}
 	case "status":
 		c.mcpHandler.handleStatus(cmd)
+	case "joke":
+		c.mcpHandler.handleJoke(cmd)
 	case "help":
 		c.mcpHandler.handleHelp(cmd)
 	default:
-		c.mcpHandler.handleHelp(cmd)
+		c.mcpHandler.ephemeral(cmd, fmt.Sprintf("Unknown command: `/toad %s`. Try `/toad help` to see what I can do.", strings.Join(args, " ")))
 	}
 }
 
@@ -231,16 +243,47 @@ func (h *SlashCommandHandler) handleMCPHelp(cmd slack.SlashCommand) {
 		"• `/toad mcp ping` — Check if the MCP server is running")
 }
 
+// --- /toad joke ---
+
+func (h *SlashCommandHandler) handleJoke(cmd slack.SlashCommand) {
+	if h.agent == nil {
+		h.post(cmd, "What do frogs do with paper? Rip-it.")
+		return
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	result, err := h.agent.Run(ctx, agent.RunOpts{
+		Prompt: "Tell me a single original joke about frogs, toads, or amphibians. " +
+			"Just the joke, nothing else. No quotes, no attribution, no preamble.",
+		Model:       h.model,
+		MaxTurns:    1,
+		Permissions: agent.PermissionNone,
+	})
+	if err != nil {
+		slog.Error("failed to generate joke", "error", err)
+		h.post(cmd, "Why are frogs so happy? They eat whatever bugs them. :frog:")
+		return
+	}
+
+	h.post(cmd, result.Result)
+}
+
 // --- /toad help ---
 
 func (h *SlashCommandHandler) handleHelp(cmd slack.SlashCommand) {
-	h.ephemeral(cmd, "*Toad Commands*\n"+
-		"• `/toad status` — Daemon status, version, and stats\n"+
-		"• `/toad mcp connect` — Generate an MCP token\n"+
-		"• `/toad mcp revoke` — Revoke your MCP token\n"+
-		"• `/toad mcp status` — Check your MCP token\n"+
-		"• `/toad mcp ping` — Check MCP server liveness\n"+
-		"• `/toad help` — Show this message")
+	text := "*Toad Commands*\n" +
+		"• `/toad status` — Daemon status, version, and stats\n"
+	if h.cfg.Enabled {
+		text += "• `/toad mcp connect` — Generate an MCP token\n" +
+			"• `/toad mcp revoke` — Revoke your MCP token\n" +
+			"• `/toad mcp status` — Check your MCP token\n" +
+			"• `/toad mcp ping` — Check MCP server liveness\n"
+	}
+	text += "• `/toad joke` — Tell a frog joke\n" +
+		"• `/toad help` — Show this message"
+	h.ephemeral(cmd, text)
 }
 
 // --- helpers ---
@@ -250,6 +293,16 @@ func (h *SlashCommandHandler) mcpScheme() string {
 		return "http"
 	}
 	return "https"
+}
+
+func (h *SlashCommandHandler) post(cmd slack.SlashCommand, text string) {
+	_, _, err := h.api.PostMessage(
+		cmd.ChannelID,
+		slack.MsgOptionText(text, false),
+	)
+	if err != nil {
+		slog.Error("failed to send message", "error", err, "channel", cmd.ChannelID)
+	}
 }
 
 func (h *SlashCommandHandler) ephemeral(cmd slack.SlashCommand, text string) {

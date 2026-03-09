@@ -60,20 +60,20 @@ changelog:
 
 report_sizes: true
 
-dockers_v2:
-  - images:
-      - "ghcr.io/scaler-tech/toad"
-    tags:
-      - "{{ .Version }}"
-      - latest
-    dockerfile: Dockerfile
-    flags:
-      - "--cache-from=type=gha"
-      - "--cache-to=type=gha,mode=max"
-    labels:
-      "org.opencontainers.image.title": toad
-      "org.opencontainers.image.version": "{{ .Version }}"
-      "org.opencontainers.image.source": "https://github.com/scaler-tech/toad"
+# dockers_v2:
+#   - images:
+#       - "ghcr.io/scaler-tech/toad"
+#     tags:
+#       - "{{ .Version }}"
+#       - latest
+#     dockerfile: Dockerfile
+#     flags:
+#       - "--cache-from=type=gha"
+#       - "--cache-to=type=gha,mode=max"
+#     labels:
+#       "org.opencontainers.image.title": toad
+#       "org.opencontainers.image.version": "{{ .Version }}"
+#       "org.opencontainers.image.source": "https://github.com/scaler-tech/toad"
 
 release:
   github:
