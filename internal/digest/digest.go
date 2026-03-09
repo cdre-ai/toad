@@ -400,6 +400,10 @@ func (e *Engine) processOpportunities(ctx context.Context, msgs []Message, oppor
 				"confidence", opp.Confidence,
 				"channel", msg.ChannelName,
 			)
+			if e.cfg.CommentInvestigation && e.notify != nil && reasoning != "" {
+				comment := fmt.Sprintf(":mag: *Investigation findings:*\n\n%s\n\n:frog: _If you'd like me to fix this, reply with_ `@toad fix this`", reasoning)
+				e.notify(msg.Channel, threadTS, comment)
+			}
 			e.totalSpawns.Add(1)
 			if e.unclaim != nil {
 				e.unclaim(threadTS)

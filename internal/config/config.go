@@ -92,6 +92,7 @@ type DigestConfig struct {
 	ChunkTimeoutSecs       int      `yaml:"chunk_timeout_secs"`       // default: 120
 	InvestigateTimeoutSecs int      `yaml:"investigate_timeout_secs"` // default: 600 (10 min)
 	InvestigateMaxTurns    int      `yaml:"investigate_max_turns"`    // default: 25
+	CommentInvestigation   bool     `yaml:"comment_investigation"`    // dry_run only: post findings as Slack reply
 }
 
 type IssueTrackerConfig struct {
