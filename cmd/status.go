@@ -125,6 +125,7 @@ type apiDaemon struct {
 	Version          string           `json:"version"`
 	DaemonVersion    string           `json:"daemon_version,omitempty"`
 	Uptime           float64          `json:"uptime_s,omitempty"`
+	StartedAt        int64            `json:"started_at,omitempty"`
 	PID              int              `json:"pid,omitempty"`
 	Ribbits          int64            `json:"ribbits"`
 	Triages          int64            `json:"triages"`
@@ -250,6 +251,7 @@ func apiDataHandler(db *state.DB, cfg *config.Config) http.HandlerFunc {
 			daemon.Running = true
 			daemon.Draining = daemonStats.Draining
 			daemon.Uptime = now.Sub(daemonStats.StartedAt).Seconds()
+			daemon.StartedAt = daemonStats.StartedAt.Unix()
 			daemon.PID = daemonStats.PID
 			if daemonStats.Version != "" {
 				daemon.DaemonVersion = daemonStats.Version
@@ -528,7 +530,7 @@ func apiRestartHandler(db *state.DB) http.HandlerFunc {
 			return
 		}
 
-		json.NewEncoder(w).Encode(map[string]any{"ok": true, "pid": pid})
+		json.NewEncoder(w).Encode(map[string]any{"ok": true, "pid": pid, "started_at": stats.StartedAt.Unix()})
 	}
 }
 
@@ -1645,6 +1647,7 @@ async function refresh() {
 let restartModalOpen = false;
 let restartStartedAt = 0;
 let restartOrigPID = 0;
+let restartOrigStartedAt = 0;
 let restartPhase = ''; // signal, drain, offline, done, error
 
 const RESTART_STEPS = [
@@ -1737,9 +1740,9 @@ function updateRestartModal(dm, active, now) {
     return;
   }
 
-  // Detect restart complete: daemon is running, not draining, and uptime reset
+  // Detect restart complete: daemon is running, not draining, and started_at changed
   if (dm.running && !dm.draining && restartOrigPID) {
-    const restarted = dm.pid !== restartOrigPID || (dm.uptime_s != null && dm.uptime_s < elapsed);
+    const restarted = dm.pid !== restartOrigPID || (dm.started_at && dm.started_at !== restartOrigStartedAt);
     if (restarted && restartPhase !== 'signal') {
       setStepState('signal', 'done');
       setStepState('drain', 'done');
@@ -1828,6 +1831,7 @@ async function triggerRestart(title) {
       return;
     }
     restartOrigPID = d.pid || 0;
+    restartOrigStartedAt = d.started_at || 0;
     setStepState('signal', 'done');
     setStepState('drain', 'active');
     restartPhase = 'drain';

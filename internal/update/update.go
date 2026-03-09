@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -27,6 +28,14 @@ type githubRelease struct {
 
 const releaseURL = "https://api.github.com/repos/scaler-tech/toad/releases/latest"
 
+// Cached ETag and last response to avoid rate limits.
+// GitHub 304 responses don't count against the rate limit.
+var (
+	cacheMu   sync.Mutex
+	cacheETag string
+	cacheLast *githubRelease
+)
+
 // Check fetches the latest release from GitHub and compares to current.
 // Returns nil Info (no error) if currentVersion is "dev" (local build).
 func Check(currentVersion string) (*Info, error) {
@@ -34,7 +43,7 @@ func Check(currentVersion string) (*Info, error) {
 		return nil, nil
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
 	release, err := fetchLatestRelease(ctx)
@@ -58,11 +67,27 @@ func fetchLatestRelease(ctx context.Context) (githubRelease, error) {
 	if err != nil {
 		return githubRelease{}, fmt.Errorf("failed to create request: %w", err)
 	}
+
+	// Use conditional request to avoid rate limits.
+	// GitHub 304 responses don't count against the rate limit.
+	cacheMu.Lock()
+	etag := cacheETag
+	cached := cacheLast
+	cacheMu.Unlock()
+	if etag != "" {
+		req.Header.Set("If-None-Match", etag)
+	}
+
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		return githubRelease{}, fmt.Errorf("failed to check for updates: %w", err)
 	}
 	defer resp.Body.Close()
+
+	// 304 Not Modified — return cached response (doesn't count against rate limit)
+	if resp.StatusCode == http.StatusNotModified && cached != nil {
+		return *cached, nil
+	}
 
 	if resp.StatusCode != http.StatusOK {
 		return githubRelease{}, fmt.Errorf("GitHub API returned %d", resp.StatusCode)
@@ -72,6 +97,15 @@ func fetchLatestRelease(ctx context.Context) (githubRelease, error) {
 	if err := json.NewDecoder(resp.Body).Decode(&release); err != nil {
 		return githubRelease{}, fmt.Errorf("failed to parse release info: %w", err)
 	}
+
+	// Cache the ETag and response for next request
+	if newETag := resp.Header.Get("ETag"); newETag != "" {
+		cacheMu.Lock()
+		cacheETag = newETag
+		cacheLast = &release
+		cacheMu.Unlock()
+	}
+
 	return release, nil
 }
 
