@@ -818,6 +818,11 @@ type DaemonStats struct {
 	DigestProcessed  int64            `json:"digest_processed"`
 	DigestOpps       int64            `json:"digest_opportunities"`
 	DigestSpawns     int64            `json:"digest_spawns"`
+	IssueTracker     bool             `json:"issue_tracker,omitempty"`
+	IssueProvider    string           `json:"issue_provider,omitempty"`
+	MCPEnabled       bool             `json:"mcp_enabled,omitempty"`
+	MCPHost          string           `json:"mcp_host,omitempty"`
+	MCPPort          int              `json:"mcp_port,omitempty"`
 }
 
 // WriteDaemonStats upserts the daemon's live stats (single row).

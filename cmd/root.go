@@ -361,6 +361,11 @@ func runDaemon(cmd *cobra.Command, args []string) error {
 				},
 				DigestEnabled: cfg.Digest.Enabled,
 				DigestDryRun:  cfg.Digest.DryRun,
+				IssueTracker:  cfg.IssueTracker.Enabled,
+				IssueProvider: cfg.IssueTracker.Provider,
+				MCPEnabled:    cfg.MCP.Enabled,
+				MCPHost:       cfg.MCP.Host,
+				MCPPort:       cfg.MCP.Port,
 			}
 			if digestEngine != nil {
 				dstats := digestEngine.Stats()
