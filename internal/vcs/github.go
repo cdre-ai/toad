@@ -457,67 +457,84 @@ func (g *GitHubProvider) ExtractRunID(detailsURL string) string {
 	return rest
 }
 
-// GetFileContributors returns up to maxTotal unique author names who recently
-// committed to any of the given file paths, excluding bot names.
-// Uses a single git log invocation across all files to avoid per-file network round-trips.
-func GetFileContributors(ctx context.Context, repoPath string, files []string, botNames map[string]bool, maxTotal int) []string {
+// GetSuggestedReviewers returns up to max GitHub login handles who have recently
+// committed to the given files, resolved via the GitHub API. Bot accounts are excluded.
+func (g *GitHubProvider) GetSuggestedReviewers(ctx context.Context, repoPath string, files []string, botNames map[string]bool, max int) []string {
 	if len(files) == 0 {
 		return nil
 	}
 
-	args := []string{"log", "--format=%an", "--since=6 months ago", "--"}
+	// Collect commit SHAs for the changed files.
+	args := []string{"log", "-n", "20", "--format=%H", "--"}
 	args = append(args, files...)
 	cmd := exec.CommandContext(ctx, "git", args...)
 	cmd.Dir = repoPath
 	out, err := cmd.Output()
 	if err != nil {
-		slog.Debug("GetFileContributors: git log failed", "error", err)
+		slog.Debug("GetSuggestedReviewers: git log failed", "error", err)
 		return nil
 	}
 
-	counts := make(map[string]int)
-	for _, name := range strings.Split(strings.TrimSpace(string(out)), "\n") {
-		name = strings.TrimSpace(name)
-		if name == "" {
+	seen := make(map[string]bool)
+	var shas []string
+	for _, sha := range strings.Split(strings.TrimSpace(string(out)), "\n") {
+		sha = strings.TrimSpace(sha)
+		if sha == "" || seen[sha] {
 			continue
 		}
-		lower := strings.ToLower(name)
-		if strings.Contains(lower, "bot") {
-			continue
-		}
-		skip := false
-		for bot := range botNames {
-			if strings.EqualFold(name, bot) {
-				skip = true
-				break
-			}
-		}
-		if !skip {
-			counts[name]++
+		seen[sha] = true
+		shas = append(shas, sha)
+		if len(shas) >= 20 {
+			break
 		}
 	}
 
-	type nameCount struct {
-		name  string
+	// Resolve each SHA to a GitHub login via the API.
+	counts := make(map[string]int)
+	for _, sha := range shas {
+		endpoint := fmt.Sprintf("repos/{owner}/{repo}/commits/%s", sha)
+		apiCmd := exec.CommandContext(ctx, "gh", "api", endpoint, "--jq", ".author.login // empty")
+		apiCmd.Dir = repoPath
+		apiOut, apiErr := apiCmd.Output()
+		if apiErr != nil {
+			slog.Debug("GetSuggestedReviewers: gh api failed", "sha", sha, "error", apiErr)
+			continue
+		}
+		login := strings.TrimSpace(string(apiOut))
+		if login == "" {
+			continue
+		}
+		lower := strings.ToLower(login)
+		if strings.Contains(lower, "bot") {
+			continue
+		}
+		if botNames[lower] {
+			continue
+		}
+		counts[login]++
+	}
+
+	type loginCount struct {
+		login string
 		count int
 	}
-	sorted := make([]nameCount, 0, len(counts))
-	for name, count := range counts {
-		sorted = append(sorted, nameCount{name, count})
+	sorted := make([]loginCount, 0, len(counts))
+	for login, count := range counts {
+		sorted = append(sorted, loginCount{login, count})
 	}
 	sort.Slice(sorted, func(i, j int) bool {
 		if sorted[i].count != sorted[j].count {
 			return sorted[i].count > sorted[j].count
 		}
-		return sorted[i].name < sorted[j].name
+		return sorted[i].login < sorted[j].login
 	})
 
-	result := make([]string, 0, maxTotal)
-	for _, nc := range sorted {
-		if len(result) >= maxTotal {
+	result := make([]string, 0, max)
+	for _, lc := range sorted {
+		if len(result) >= max {
 			break
 		}
-		result = append(result, nc.name)
+		result = append(result, lc.login)
 	}
 	return result
 }

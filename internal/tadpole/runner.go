@@ -351,29 +351,31 @@ func (r *Runner) ship(ctx context.Context, vcsProvider vcs.Provider, worktreePat
 		issueLine = fmt.Sprintf("%s: %s\n\n", capitalize(task.IssueRef.Provider), task.IssueRef.ID)
 	}
 
-	// Look up suggested reviewers based on changed files (GitHub only, non-fatal)
+	// Look up suggested reviewers based on changed files (non-fatal)
 	reviewersSection := ""
-	if _, ok := vcsProvider.(*vcs.GitHubProvider); ok {
-		changedFilesCmd := exec.CommandContext(ctx, "git", "diff", "--name-only", "origin/"+defaultBranch+"...HEAD")
-		changedFilesCmd.Dir = worktreePath
-		if changedOut, changedErr := changedFilesCmd.Output(); changedErr == nil {
-			var changedFiles []string
-			for _, f := range strings.Split(strings.TrimSpace(string(changedOut)), "\n") {
-				f = strings.TrimSpace(f)
-				if f != "" {
-					changedFiles = append(changedFiles, f)
-				}
+	changedFilesCmd := exec.CommandContext(ctx, "git", "diff", "--name-only", "origin/"+defaultBranch+"...HEAD")
+	changedFilesCmd.Dir = worktreePath
+	if changedOut, changedErr := changedFilesCmd.Output(); changedErr == nil {
+		var changedFiles []string
+		for _, f := range strings.Split(strings.TrimSpace(string(changedOut)), "\n") {
+			f = strings.TrimSpace(f)
+			if f != "" {
+				changedFiles = append(changedFiles, f)
 			}
-			botSet := make(map[string]bool)
-			for _, u := range r.cfg.VCS.BotUsernames {
-				botSet[u] = true
-			}
-			if contributors := vcs.GetFileContributors(ctx, worktreePath, changedFiles, botSet, 5); len(contributors) > 0 {
-				reviewersSection = fmt.Sprintf("**Suggested reviewers** (based on recent file history): %s\n\n", strings.Join(contributors, ", "))
-			}
-		} else {
-			slog.Debug("failed to get changed files for reviewer lookup", "error", changedErr)
 		}
+		botSet := make(map[string]bool)
+		for _, u := range r.cfg.VCS.BotUsernames {
+			botSet[strings.ToLower(u)] = true
+		}
+		if logins := vcsProvider.GetSuggestedReviewers(ctx, worktreePath, changedFiles, botSet, 2); len(logins) > 0 {
+			tagged := make([]string, len(logins))
+			for i, login := range logins {
+				tagged[i] = "@" + login
+			}
+			reviewersSection = fmt.Sprintf("**Suggested reviewers:** %s\n\n", strings.Join(tagged, ", "))
+		}
+	} else {
+		slog.Debug("failed to get changed files for reviewer lookup", "error", changedErr)
 	}
 
 	slackContext := sanitizeForPR(task.Description, 2000)
