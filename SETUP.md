@@ -21,6 +21,7 @@ The complete guide to installing, configuring, and running toad — from zero to
   - [issue_tracker](#issue_tracker)
   - [vcs](#vcs)
   - [log](#log)
+  - [mcp](#mcp)
 - [Environment Variables](#environment-variables)
 - [CLI Commands](#cli-commands)
 - [Interacting with Toad](#interacting-with-toad)
@@ -29,6 +30,7 @@ The complete guide to installing, configuring, and running toad — from zero to
   - [PR Review Automation](#pr-review-automation)
   - [Toad King (Digest) Tuning](#toad-king-digest-tuning)
   - [Mixed GitHub/GitLab Setups](#mixed-githubgitlab-setups)
+  - [MCP Server](#mcp-server)
 - [Troubleshooting](#troubleshooting)
 - [Complete Example Config](#complete-example-config)
 
@@ -533,6 +535,31 @@ log:
 
 ---
 
+### `mcp`
+
+MCP (Model Context Protocol) server for Claude Desktop and Claude Code integration.
+
+```yaml
+mcp:
+  enabled: false
+  host: localhost
+  port: 8099
+  devs: []
+  message: ""
+```
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `enabled` | bool | `false` | Enable the MCP server |
+| `host` | string | `"localhost"` | Host to bind the HTTP server to |
+| `port` | int | `8099` | Port for the MCP HTTP endpoint |
+| `devs` | list | `[]` | Slack user IDs granted `dev` role (access to logs tool) |
+| `message` | string | `""` | Optional message included in the DM when a user runs `/toad mcp connect` |
+
+**How it works:** When enabled, toad starts a Streamable HTTP server at `http://{host}:{port}/mcp`. Users authenticate via bearer tokens generated through the `/toad mcp connect` Slack slash command. A public health endpoint is available at `/health`.
+
+---
+
 ## Environment Variables
 
 Environment variables override config file values.
@@ -611,7 +638,9 @@ toad status --port 8080
 |------|-------------|
 | `--port` | Pin to a specific port (default: random available) |
 
-Opens a web dashboard in your browser showing daemon status, active runs, history, triage breakdown, Toad King stats, PR watches, and config. Refreshes every 2 seconds. Reads directly from SQLite, so it works even when the daemon is stopped.
+Opens a web dashboard in your browser with real-time monitoring: daemon status, active runs, run history, triage breakdown, Toad King opportunities, PR watches, merge stats, integration status (Digest, Issue Tracker, MCP, PR Reviewer), Claude Code usage, and config. Auto-refreshes every 3 seconds. Reads directly from SQLite, so it works even when the daemon is stopped.
+
+A kiosk view is available at `/kiosk` — optimized for office TVs and large displays with a two-column layout, large stat tiles, and a clock. Access it at `http://localhost:{port}/kiosk`.
 
 ### `toad version`
 
@@ -633,6 +662,16 @@ toad update
 ```
 
 Uses Homebrew if available, otherwise prints manual update instructions.
+
+### `toad restart`
+
+Gracefully restart the running daemon.
+
+```bash
+toad restart
+```
+
+Sends a restart signal to the running daemon. The daemon drains in-flight messages, waits for active tadpoles to finish (up to 30 minutes), then restarts with the latest binary and config. Useful after config changes or updates.
 
 ---
 
@@ -777,6 +816,47 @@ Each repo uses its own VCS provider for PR creation and review monitoring. The g
 
 ---
 
+### MCP Server
+
+The MCP server lets Claude Desktop and Claude Code interact with your toad instance — asking codebase questions and reading daemon logs.
+
+**Setup:**
+
+1. Enable in config:
+   ```yaml
+   mcp:
+     enabled: true
+     port: 8099
+     devs:
+       - U0123ABCDEF    # Slack user IDs with dev access
+   ```
+
+2. Add a `/toad` slash command to your Slack app (see [Slack App Setup](#step-4b-add-slash-command-optional-for-mcp-server))
+
+3. In Slack, run `/toad mcp connect` — toad DMs you a personal token and the `claude mcp add` command to run
+
+4. Add to Claude Code:
+   ```bash
+   claude mcp add toad -- curl -N -H "Authorization: Bearer YOUR_TOKEN" http://localhost:8099/mcp
+   ```
+
+**Available tools:**
+- **ask** — Ask toad a codebase question. Uses the ribbit engine with read-only tools (Glob, Grep, Read). Supports multi-turn conversation context per user.
+- **logs** — Read and filter daemon log lines. Supports line count, level filtering, and regex search. Requires `dev` role.
+
+**Slash commands:**
+| Command | Description |
+|---------|-------------|
+| `/toad mcp connect` | Generate a personal MCP token (sent via DM) |
+| `/toad mcp status` | Check your token status |
+| `/toad mcp revoke` | Revoke your current token |
+| `/toad mcp ping` | Verify MCP server connectivity |
+
+**Health endpoint:**
+`GET http://localhost:8099/health` returns daemon status (uptime, active tadpoles/ribbits, Slack connection) — no authentication required.
+
+---
+
 ## Troubleshooting
 
 ### Toad doesn't respond to messages
@@ -824,6 +904,16 @@ Each repo uses its own VCS provider for PR creation and review monitoring. The g
 - State DB: `~/.toad/state.db` — delete to reset (toad recreates on startup)
 - Worktrees: `~/.toad/worktrees/` — toad cleans orphans on startup, but you can delete manually
 - Logs: check `~/.toad/toad.log` (or wherever `log.file` points)
+- Auto-update: the dashboard can trigger updates and restarts — look for the update indicator in the dashboard header
+
+### Daemon crashed mid-tadpole
+
+If the daemon crashes or is killed while tadpoles are running, toad handles recovery automatically on the next startup:
+- Stale runs (stuck in starting/running/validating/shipping) are marked as failed
+- Orphaned worktrees in `~/.toad/worktrees/` are cleaned up
+- PR watches continue from where they left off
+
+No manual intervention is needed — just restart toad.
 
 ---
 
@@ -929,4 +1019,12 @@ vcs:
 log:
   level: info                             # debug, info, warn, error
   file: ~/.toad/toad.log                  # log file path
+
+# MCP server (Claude Desktop/Code integration)
+mcp:
+  enabled: false                          # opt-in MCP server
+  host: localhost                         # bind host
+  port: 8099                              # HTTP port
+  devs: []                                # Slack user IDs with dev access
+  message: ""                             # DM message on connect
 ```

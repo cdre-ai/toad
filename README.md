@@ -22,6 +22,7 @@ On top of that, toad handles the full reactive path too — @mention it with a b
 | CI failure auto-fix | Yes | No | No | No |
 | Cost | Your existing Claude sub | Per-seat | Per-seat | Per-seat |
 | Slack-native | Yes | No | Coming | Coming |
+| MCP integration (Claude Desktop) | Yes | No | No | No |
 
 ## 🐣 How it works
 
@@ -107,6 +108,7 @@ Toad connects to Slack via Socket Mode, auto-joins public channels, and starts l
 | `toad status` | Open live monitoring dashboard in browser |
 | `toad version` | Print version info |
 | `toad update` | Self-update to latest version |
+| `toad restart` | Gracefully restart the daemon |
 
 ## 🏛️ Architecture
 
@@ -129,6 +131,7 @@ internal/
   agent/           Coding agent provider abstraction (see PROVIDERS.md)
   vcs/             VCS provider abstraction (see PROVIDERS.md)
   issuetracker/    Issue tracker abstraction (see PROVIDERS.md)
+  mcp/             MCP server for Claude Desktop/Code integration
 ```
 
 Three packages use a provider/plugin pattern for extensibility. See the `PROVIDERS.md` in each directory for the interface contracts, current implementations, and how to add new ones.
@@ -139,6 +142,23 @@ Three packages use a provider/plugin pattern for extensibility. See the `PROVIDE
 - **Three-tier intelligence** — Haiku for triage (~$0.001), Sonnet for investigation (read-only), Sonnet for execution (full tools).
 - **6-layer guardrails on proactive spawning** — disabled by default, 0.95 confidence threshold, category + size restrictions, hourly cap, existing validation + human PR review.
 - **Write-through state** — in-memory cache + SQLite for crash recovery and dashboard.
+- **MCP server** — optional Streamable HTTP endpoint lets Claude Desktop and Claude Code query toad (ask questions, read logs) via authenticated tokens managed through Slack.
+
+## 🔌 MCP Server
+
+Toad includes an optional MCP (Model Context Protocol) server that lets Claude Desktop and Claude Code interact with your toad instance directly — ask codebase questions, read daemon logs, and check health.
+
+**Setup:**
+1. Enable in config: `mcp.enabled: true` and set `mcp.port: 8099`
+2. Add a `/toad` slash command to your Slack app (see [Setup Guide](SETUP.md))
+3. Run `/toad mcp connect` in Slack to get a personal token
+4. Add toad as an MCP server in Claude Desktop or Claude Code
+
+**Available tools:**
+- `ask` — Ask toad a codebase question (uses ribbit engine with read-only tools)
+- `logs` — Read and filter daemon logs (dev role required)
+
+> For full setup instructions, see the **[Setup Guide](SETUP.md#mcp-server)**.
 
 ## 🛠️ Development
 

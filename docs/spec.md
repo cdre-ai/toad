@@ -45,6 +45,11 @@ Toad is a Go CLI daemon that monitors Slack channels, triages messages for code-
 |  | write-through    |  | detect reviews   |  | thread_memory    |       |
 |  | to SQLite        |  | spawn fix        |  | pr_watches       |       |
 |  +------------------+  +------------------+  +------------------+       |
+|  +------------------+                                                |
+|  | MCP Server       |                                                |
+|  | HTTP + auth      |                                                |
+|  | ask, logs tools  |                                                |
+|  +------------------+                                                |
 +---------------------------------------------------------------------------+
 ```
 
@@ -59,13 +64,19 @@ toad/
 +-- go.sum
 |
 +-- cmd/
-|   +-- root.go                # Cobra root: `toad` daemon, `toad status`
+|   +-- root.go                # Cobra root: `toad` daemon
 |   +-- run.go                 # `toad run "task"` manual one-shot
 |   +-- init.go                # `toad init` interactive setup wizard
+|   +-- status.go              # `toad status` web dashboard server
+|   +-- restart.go             # `toad restart` graceful restart
+|   +-- update.go              # `toad update` self-update
+|   +-- version.go             # `toad version`
 |
 +-- internal/
 |   +-- config/
-|   |   +-- config.go          # YAML config loading, defaults, validation
+|   |   +-- config.go          # YAML config, defaults, validation, multi-repo
+|   |   +-- profile.go         # Auto-detect repo stack/module for triage context
+|   |   +-- resolver.go        # Route messages to repos via file verification
 |   |   +-- config_test.go
 |   |
 |   +-- slack/
@@ -102,6 +113,31 @@ toad/
 |   |
 |   +-- digest/
 |   |   +-- digest.go          # Toad King: batch messages, Haiku analysis, auto-spawn
+|   |
+|   +-- agent/
+|   |   +-- provider.go        # Coding agent provider interface
+|   |   +-- claude.go          # Claude Code CLI implementation
+|   |
+|   +-- vcs/
+|   |   +-- provider.go        # VCS provider interface (GitHub/GitLab)
+|   |   +-- github.go          # GitHub provider (gh CLI)
+|   |   +-- gitlab.go          # GitLab provider (glab CLI, self-hosted)
+|   |
+|   +-- issuetracker/
+|   |   +-- tracker.go         # Issue tracker interface
+|   |   +-- linear.go          # Linear provider (GraphQL API)
+|   |   +-- gate.go            # Assignee gating for spawning
+|   |
+|   +-- mcp/
+|   |   +-- server.go          # MCP HTTP server with auth middleware
+|   |   +-- tools.go           # MCP tool definitions (ask, logs)
+|   |   +-- session.go         # Per-user conversation context
+|   |
+|   +-- preflight/
+|   |   +-- preflight.go       # Startup tool validation (claude, gh, glab, git)
+|   |
+|   +-- update/
+|   |   +-- update.go          # Version checking, semver comparison
 |   |
 |   +-- tui/
 |   |   +-- theme.go           # Shared toad huh theme + color constants
@@ -141,13 +177,17 @@ Writes `.toad.yaml` with just the two tokens.
 
 ```go
 type Config struct {
-    Slack    SlackConfig    `yaml:"slack"`
-    Repo     RepoConfig     `yaml:"repo"`
-    Limits   LimitsConfig   `yaml:"limits"`
-    Triage   TriageConfig   `yaml:"triage"`
-    Claude   ClaudeConfig   `yaml:"claude"`
-    Digest   DigestConfig   `yaml:"digest"`
-    Log      LogConfig      `yaml:"log"`
+    Slack        SlackConfig        `yaml:"slack"`
+    Repos        []RepoConfig       `yaml:"repos"`
+    Limits       LimitsConfig       `yaml:"limits"`
+    Triage       TriageConfig       `yaml:"triage"`
+    Claude       ClaudeConfig       `yaml:"claude"`
+    Digest       DigestConfig       `yaml:"digest"`
+    IssueTracker IssueTrackerConfig `yaml:"issue_tracker"`
+    VCS          VCSConfig          `yaml:"vcs"`
+    Agent        AgentConfig        `yaml:"agent"`
+    Log          LogConfig          `yaml:"log"`
+    MCP          MCPConfig          `yaml:"mcp"`
 }
 
 type DigestConfig struct {
@@ -350,6 +390,30 @@ digest:
 log:
   level: "info"
   file: "~/.toad/toad.log"
+
+# Issue tracking (Linear integration)
+issue_tracker:
+  enabled: false
+  provider: "linear"
+  # api_token: "${TOAD_LINEAR_API_TOKEN}"
+  # team_id: ""
+  # create_issues: false
+
+# Version control
+vcs:
+  platform: "github"
+  # host: ""              # for self-hosted GitLab
+  # bot_usernames: []
+
+# Agent provider
+agent:
+  platform: "claude"
+  model: "sonnet"
+
+# MCP server
+mcp:
+  enabled: false
+  port: 8099
 ```
 
 ---
@@ -401,13 +465,19 @@ Toad auto-joins all public channels on startup. For private channels, use `/invi
 1. Load config (defaults -> global -> project -> env vars)
 2. Set up structured logging
 3. Validate config (auto-init wizard if missing and in terminal)
-4. Check `claude` and `gh` CLI tools are in PATH
-5. Open SQLite database (`~/.toad/state.db`)
-6. Run crash recovery (mark stale runs failed, clean orphaned worktrees)
-7. Hydrate state manager from DB
-8. Initialize triage, ribbit, tadpole pool
-9. Initialize PR review watcher + wire `OnShip` callback
-10. Initialize digest engine (if `digest.enabled`)
-11. Connect to Slack (AuthTest + auto-join public channels)
-12. Start background goroutines: PR watcher, digest engine, thread memory pruning
-13. Enter Socket Mode event loop
+4. Run preflight checks (`claude`, `gh`/`glab`, `git` tools in PATH, repo paths exist)
+5. Check for updates (async background)
+6. Build repo profiles (auto-detect stack/module per repo for triage hints)
+7. Create VCS resolver (per-repo provider mapping)
+8. Open SQLite database (`~/.toad/state.db`)
+9. Run crash recovery (mark stale runs failed, clean orphaned worktrees)
+10. Hydrate state manager from DB
+11. Initialize agent provider, triage, ribbit, issue tracker
+12. Create concurrency pools (ribbits: max_concurrent*3, tadpoles: max_concurrent)
+13. Initialize Slack client + tadpole runner
+14. Initialize PR review watcher + wire `OnShip` callback
+15. Start MCP server (if `mcp.enabled`)
+16. Initialize digest engine (if `digest.enabled`)
+17. Connect to Slack (AuthTest + auto-join public channels)
+18. Start background goroutines: PR watcher, repo sync, worktree cleanup, digest engine, thread memory pruning, stats writer
+19. Enter Socket Mode event loop

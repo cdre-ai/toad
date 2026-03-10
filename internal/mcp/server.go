@@ -63,7 +63,9 @@ func (s *Server) Start(ctx context.Context) error {
 		func(_ *http.Request) *gomcp.Server {
 			return s.mcpServer
 		},
-		nil,
+		&gomcp.StreamableHTTPOptions{
+			Stateless: true,
+		},
 	)
 
 	mux := http.NewServeMux()

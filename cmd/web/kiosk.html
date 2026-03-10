@@ -430,6 +430,11 @@ function updateClock() {
 updateClock();
 setInterval(updateClock, 1000);
 
+// Auto-update tracking
+let updatePhase = ''; // '', 'waiting', 'reloading'
+let updateOrigPID = 0;
+let updateOrigStartedAt = 0;
+
 async function refresh() {
   try {
     const resp = await fetch('/api/data');
@@ -451,6 +456,28 @@ async function refresh() {
     } else {
       pill.className = 'status-pill offline';
       stxt.textContent = 'Offline';
+    }
+
+    // ── Auto-update: detect restart and reload kiosk ──
+    if (d.auto_restarting && updatePhase === '') {
+      updateOrigPID = d.auto_restart_pid || dm.pid || 0;
+      updateOrigStartedAt = d.auto_restart_started || dm.started_at || 0;
+      updatePhase = 'waiting';
+      pill.className = 'status-pill online';
+      stxt.textContent = 'Updating\u2026';
+    }
+    if (updatePhase === 'waiting' && dm.running && !dm.draining && updateOrigPID) {
+      const restarted = dm.pid !== updateOrigPID || (dm.started_at && dm.started_at !== updateOrigStartedAt);
+      if (restarted) {
+        updatePhase = 'reloading';
+        pill.className = 'status-pill online';
+        stxt.textContent = 'Reloading\u2026';
+        try { await fetch('/api/reload-dashboard'); } catch {}
+        const poll = setInterval(() => {
+          fetch('/api/data').then(() => { clearInterval(poll); window.location.reload(); }).catch(() => {});
+        }, 1000);
+        return;
+      }
     }
 
     // ── Stat tiles ──
