@@ -23,6 +23,7 @@ import (
 )
 
 var statusPort int
+var statusNoBrowser bool
 
 var statusCmd = &cobra.Command{
 	Use:   "status",
@@ -32,6 +33,7 @@ var statusCmd = &cobra.Command{
 
 func init() {
 	statusCmd.Flags().IntVar(&statusPort, "port", 0, "port to serve dashboard on (default: random available port)")
+	statusCmd.Flags().BoolVar(&statusNoBrowser, "no-browser", false, "don't open browser on start")
 	rootCmd.AddCommand(statusCmd)
 }
 
@@ -69,7 +71,9 @@ func runStatus(cmd *cobra.Command, args []string) error {
 
 	url := fmt.Sprintf("http://%s", ln.Addr().String())
 	fmt.Printf("toad dashboard: %s\n", url)
-	openBrowser(url)
+	if !statusNoBrowser {
+		openBrowser(url)
+	}
 
 	fmt.Println("Press Ctrl+C to stop")
 	return http.Serve(ln, mux)
@@ -584,7 +588,7 @@ func apiReloadDashboardHandler(port int) http.HandlerFunc {
 				return
 			}
 			// Ensure the new process uses the same port so the browser can reconnect
-			args := []string{binary, "status", "--port", fmt.Sprintf("%d", port)}
+			args := []string{binary, "status", "--port", fmt.Sprintf("%d", port), "--no-browser"}
 			slog.Info("reloading dashboard process", "binary", binary, "port", port)
 			if err := execReplace(binary, args, os.Environ()); err != nil {
 				slog.Error("dashboard reload failed", "error", err)
@@ -875,7 +879,9 @@ const dashboardHTML = `<!DOCTYPE html>
     margin-bottom: 20px;
   }
   header h1 { font-size: 20px; font-weight: 600; }
-  .header-right { display: flex; align-items: center; gap: 16px; }
+  .header-right { display: flex; align-items: center; gap: 10px; }
+  .header-sep { width: 1px; height: 20px; background: var(--border); margin: 0 2px; }
+  .header-group { display: flex; align-items: center; gap: 6px; }
   .daemon-badge {
     display: inline-flex; align-items: center; gap: 6px;
     font-size: 12px; font-weight: 500;
@@ -887,7 +893,7 @@ const dashboardHTML = `<!DOCTYPE html>
     width: 7px; height: 7px; border-radius: 50%; background: currentColor;
   }
   .daemon-badge.online .indicator { animation: pulse 2s ease-in-out infinite; }
-  .refresh-info { color: var(--dim); font-size: 12px; }
+  .refresh-info { color: var(--dim); font-size: 12px; width: 58px; text-align: right; font-variant-numeric: tabular-nums; }
   .update-badge {
     display: none; font-size: 12px; font-weight: 500;
     padding: 3px 10px; border-radius: 12px;
@@ -906,7 +912,7 @@ const dashboardHTML = `<!DOCTYPE html>
   .action-btn.danger:hover { background: rgba(255,193,7,0.1); }
   .icon-btn {
     display: inline-flex; align-items: center; justify-content: center;
-    width: 30px; height: 30px; padding: 0; border-radius: 6px;
+    width: 28px; height: 28px; padding: 0; border-radius: 6px;
     border: 1px solid var(--border); background: var(--surface);
     color: var(--muted); cursor: pointer;
     transition: background 0.15s, border-color 0.15s, color 0.15s;
@@ -918,7 +924,7 @@ const dashboardHTML = `<!DOCTYPE html>
   .icon-btn.danger:hover { background: rgba(255,193,7,0.1); }
   .icon-btn svg { width: 14px; height: 14px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
   .icon-btn .tooltip {
-    position: absolute; bottom: calc(100% + 6px); left: 50%; transform: translateX(-50%);
+    position: absolute; top: calc(100% + 6px); left: 50%; transform: translateX(-50%);
     background: var(--surface); border: 1px solid var(--border); border-radius: 4px;
     padding: 4px 8px; font-size: 11px; color: var(--text); white-space: nowrap;
     opacity: 0; pointer-events: none; transition: opacity 0.15s;
@@ -1055,7 +1061,10 @@ const dashboardHTML = `<!DOCTYPE html>
     grid-template-columns: 1fr 1fr;
     gap: 16px;
     margin-bottom: 20px;
+    align-items: stretch;
   }
+  .two-col > section { display: flex; flex-direction: column; }
+  .two-col > section .info-panel { flex: 1; }
 
   /* Section */
   section { margin-bottom: 20px; }
@@ -1083,12 +1092,16 @@ const dashboardHTML = `<!DOCTYPE html>
     padding: 7px 10px;
     border-bottom: 1px solid var(--border);
     vertical-align: top;
+    white-space: nowrap;
+  }
+  td.ellipsis {
     max-width: 0;
     overflow: hidden;
     text-overflow: ellipsis;
-    white-space: nowrap;
   }
   tr:last-child td { border-bottom: none; }
+  #opps-wrap td { vertical-align: middle; }
+  #opps-wrap td:nth-child(2) { vertical-align: top; }
   .table-wrap {
     background: var(--surface); border: 1px solid var(--border);
     border-radius: 8px; overflow: hidden;
@@ -1184,24 +1197,28 @@ const dashboardHTML = `<!DOCTYPE html>
 <header>
   <h1>&#x1f438; toad dashboard</h1>
   <div class="header-right">
+    <span class="daemon-badge offline" id="daemon-badge">
+      <span class="indicator"></span> <span id="daemon-text">Offline</span>
+    </span>
+    <span class="header-sep"></span>
     <span class="update-badge" id="update-badge"></span>
     <span id="version-mismatch" class="version-mismatch" style="display:none"></span>
     <div class="toggle-wrap" id="auto-update-toggle" onclick="toggleAutoUpdate()" title="Automatically update and restart when new versions are available">
       <span class="toggle-track"><span class="toggle-thumb"></span></span>
       <span class="toggle-text">Auto update</span>
     </div>
-    <button class="icon-btn" id="btn-check-update" onclick="checkForUpdate()">
-      <svg viewBox="0 0 24 24"><path d="M21 12a9 9 0 1 1-9-9c2.52 0 4.93 1 6.74 2.74L21 8"/><polyline points="21 3 21 8 16 8"/></svg>
-      <span class="tooltip">Check for updates</span>
-    </button>
     <button class="action-btn" id="btn-update" onclick="doUpdate()" style="display:none" title="Download and install latest version">Update</button>
-    <button class="icon-btn danger" id="btn-restart" onclick="doRestart()">
-      <svg viewBox="0 0 24 24"><polyline points="1 4 1 10 7 10"/><path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10"/></svg>
-      <span class="tooltip">Restart daemon</span>
-    </button>
-    <span class="daemon-badge offline" id="daemon-badge">
-      <span class="indicator"></span> <span id="daemon-text">Offline</span>
-    </span>
+    <span class="header-sep"></span>
+    <div class="header-group">
+      <button class="icon-btn" id="btn-check-update" onclick="checkForUpdate()">
+        <svg viewBox="0 0 24 24"><polyline points="8 17 12 21 16 17"/><line x1="12" y1="12" x2="12" y2="21"/><path d="M20.88 18.09A5 5 0 0 0 18 9h-1.26A8 8 0 1 0 3 16.29"/></svg>
+        <span class="tooltip">Check for updates</span>
+      </button>
+      <button class="icon-btn danger" id="btn-restart" onclick="doRestart()">
+        <svg viewBox="0 0 24 24"><polyline points="1 4 1 10 7 10"/><path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10"/></svg>
+        <span class="tooltip">Restart daemon</span>
+      </button>
+    </div>
     <span class="refresh-info" id="last-refresh"></span>
   </div>
 </header>
@@ -1526,8 +1543,8 @@ async function refresh() {
       for (const r of active) {
         const elapsed = now - r.started_at;
         html += '<tr><td>' + statusBadge(r.status, true) + '</td>'
-          + '<td class="mono">' + esc(r.branch) + '</td>'
-          + '<td>' + esc(r.task) + '</td>'
+          + '<td class="mono ellipsis">' + esc(r.branch) + '</td>'
+          + '<td class="ellipsis" title="' + esc(r.task) + '">' + esc(r.task) + '</td>'
           + '<td class="mono">' + fmtDuration(elapsed) + '</td></tr>';
       }
       html += '</table>';
@@ -1540,7 +1557,7 @@ async function refresh() {
     if (history.length === 0) {
       document.getElementById('history-wrap').innerHTML = '<div class="empty">No completed runs</div>';
     } else {
-      let html = '<table><tr><th style="width:90px">Status</th><th style="width:22%">Branch</th><th>Task</th><th style="width:60px">Files</th><th style="width:80px">Duration</th><th style="width:22%">' + prNoun + '</th></tr>';
+      let html = '<table><tr><th style="width:90px">Status</th><th style="width:140px">Branch</th><th>Task</th><th style="width:50px">Files</th><th style="width:80px">Duration</th><th style="width:20%">' + prNoun + '</th></tr>';
       for (let i = 0; i < history.length; i++) {
         const r = history[i];
         const hidden = !historyExpanded && i >= MAX_VISIBLE ? ' style="display:none"' : '';
@@ -1548,11 +1565,11 @@ async function refresh() {
           ? shortURL(r.pr_url)
           : '<span style="color:var(--dim)">' + esc(r.error || '-') + '</span>';
         html += '<tr' + hidden + '><td>' + statusBadge(r.status, false) + '</td>'
-          + '<td class="mono">' + esc(r.branch) + '</td>'
-          + '<td>' + esc(r.task) + '</td>'
+          + '<td class="mono ellipsis">' + esc(r.branch) + '</td>'
+          + '<td class="ellipsis" title="' + esc(r.task) + '">' + esc(r.task) + '</td>'
           + '<td class="mono">' + (r.files_changed || '-') + '</td>'
           + '<td class="mono">' + fmtDuration(r.duration_s) + '</td>'
-          + '<td>' + pr + '</td></tr>';
+          + '<td class="ellipsis">' + pr + '</td></tr>';
       }
       html += '</table>';
       if (history.length > MAX_VISIBLE) {
@@ -1635,7 +1652,7 @@ async function refresh() {
         ohtml = '<div class="empty">Toad King is monitoring your channels (' + modeLabel + ' mode). Opportunities will appear here as they are identified.</div>';
         document.getElementById('opps-wrap').innerHTML = ohtml;
       } else {
-        ohtml = '<table><tr><th style="width:80px">When</th><th>Summary</th><th style="width:70px">Category</th><th style="width:80px">Confidence</th><th style="width:60px">Size</th><th style="width:80px">Status</th><th style="width:28px"></th></tr>';
+        ohtml = '<table><tr><th style="width:80px">When</th><th>Summary</th><th style="width:70px">Category</th><th style="width:85px">Confidence</th><th style="width:70px">Size</th><th style="width:100px">Status</th><th style="width:28px"></th></tr>';
         for (let i = 0; i < opps.length; i++) {
           const o = opps[i];
           const hidden = !oppsExpanded && i >= MAX_VISIBLE ? ' display:none;' : '';
@@ -1702,9 +1719,9 @@ async function refresh() {
       let html = '<table><tr><th style="width:60px">' + prNoun + '</th><th style="width:30%">Branch</th><th style="width:60px">Fixes</th><th>URL</th></tr>';
       for (const w of watches) {
         html += '<tr><td class="mono">#' + w.pr_number + '</td>'
-          + '<td class="mono">' + esc(w.branch) + '</td>'
+          + '<td class="mono ellipsis">' + esc(w.branch) + '</td>'
           + '<td>' + w.fix_count + '/3</td>'
-          + '<td>' + shortURL(w.pr_url) + '</td></tr>';
+          + '<td class="ellipsis">' + shortURL(w.pr_url) + '</td></tr>';
       }
       html += '</table>';
       document.getElementById('watches-wrap').innerHTML = html;
