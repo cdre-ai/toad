@@ -290,13 +290,17 @@ func TestFixThisBlocks(t *testing.T) {
 
 func TestSpawnedByBlocks(t *testing.T) {
 	text := "Found a bug in utils/time.go"
-	userName := "jamie"
-	blocks := SpawnedByBlocks(text, userName)
+	// Build original blocks as FixThisBlocks would
+	origBlocks := FixThisBlocks(text, "1234567890.123456")
+	orig := goslack.Blocks{BlockSet: origBlocks}
+
+	blocks := SpawnedByBlocks(orig, "jamie")
 
 	if len(blocks) != 2 {
-		t.Fatalf("expected 2 blocks, got %d", len(blocks))
+		t.Fatalf("expected 2 blocks (section + context), got %d", len(blocks))
 	}
 
+	// First block: original section preserved
 	section, ok := blocks[0].(*goslack.SectionBlock)
 	if !ok {
 		t.Fatalf("expected SectionBlock, got %T", blocks[0])
@@ -305,6 +309,7 @@ func TestSpawnedByBlocks(t *testing.T) {
 		t.Errorf("expected text %q, got %q", text, section.Text.Text)
 	}
 
+	// Second block: action block replaced with context
 	ctx, ok := blocks[1].(*goslack.ContextBlock)
 	if !ok {
 		t.Fatalf("expected ContextBlock, got %T", blocks[1])

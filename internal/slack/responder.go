@@ -15,7 +15,7 @@ func FixThisBlocks(text, threadTS string) []slack.Block {
 		nil, nil,
 	)
 	btn := slack.NewButtonBlockElement("toad_fix", threadTS,
-		slack.NewTextBlockObject(slack.PlainTextType, "Fix this", false, false),
+		slack.NewTextBlockObject(slack.PlainTextType, "Let Toad fix this", false, false),
 	)
 	btn.WithStyle(slack.StylePrimary)
 	actions := slack.NewActionBlock("toad_fix_actions", btn)
@@ -23,16 +23,21 @@ func FixThisBlocks(text, threadTS string) []slack.Block {
 }
 
 // SpawnedByBlocks builds Block Kit blocks that replace the button after a tadpole is spawned.
-func SpawnedByBlocks(text, userName string) []slack.Block {
-	section := slack.NewSectionBlock(
-		slack.NewTextBlockObject(slack.MarkdownType, text, false, false),
-		nil, nil,
-	)
-	ctx := slack.NewContextBlock("toad_fix_status",
+// origBlocks are the original message blocks (with the button); the section text is preserved
+// and the action block is replaced with a context line showing who triggered the fix.
+func SpawnedByBlocks(origBlocks slack.Blocks, userName string) []slack.Block {
+	var result []slack.Block
+	for _, b := range origBlocks.BlockSet {
+		// Keep all blocks except the action block (the button)
+		if _, isAction := b.(*slack.ActionBlock); !isAction {
+			result = append(result, b)
+		}
+	}
+	result = append(result, slack.NewContextBlock("toad_fix_status",
 		slack.NewTextBlockObject(slack.MarkdownType,
 			":hatching_chick: Tadpole spawned by "+userName, false, false),
-	)
-	return []slack.Block{section, ctx}
+	))
+	return result
 }
 
 // ReplyInThreadWithBlocks posts a Block Kit message as a thread reply and tracks it.

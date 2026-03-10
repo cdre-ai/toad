@@ -38,14 +38,10 @@ func handleInteractive(ctx context.Context, c *Client, evt socketmode.Event) {
 
 	slog.Info("fix button clicked", "channel", channel, "user", userID, "thread", threadTS)
 
-	// Update the message to replace the button with "Tadpole spawned by @user"
+	// Update the message: keep original section blocks, replace the button with a context line.
 	userName := c.ResolveUserName(userID)
-	origText := ""
-	if cb.Message.Text != "" {
-		origText = cb.Message.Text
-	}
-	blocks := SpawnedByBlocks(origText, userName)
-	if err := c.UpdateMessageWithBlocks(channel, cb.MessageTs, origText, blocks); err != nil {
+	blocks := SpawnedByBlocks(cb.Message.Blocks, userName)
+	if err := c.UpdateMessageWithBlocks(channel, cb.MessageTs, cb.Message.Text, blocks); err != nil {
 		slog.Warn("failed to update button message", "error", err)
 	}
 
