@@ -112,30 +112,29 @@
     min-height: 0;
     overflow: hidden;
   }
-  .main.has-personality {
-    grid-template-columns: 1fr 1fr 280px;
-  }
 
-  /* ── Personality panel ── */
-  .personality-panel {
+  /* ── Personality radar card ── */
+  .personality-card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 12px;
+    margin-bottom: 10px;
     display: flex;
-    flex-direction: column;
     align-items: center;
-    justify-content: center;
-    padding: 16px;
-    border-left: 1px solid var(--border);
+    gap: 12px;
   }
-  .personality-panel canvas {
-    max-width: 250px;
-    max-height: 250px;
+  .personality-card canvas {
+    width: 160px !important;
+    height: 160px !important;
+    flex-shrink: 0;
   }
-  .personality-name {
+  .personality-card-label {
     font-size: 11px;
     font-weight: 600;
     text-transform: uppercase;
     letter-spacing: 0.6px;
     color: var(--dim);
-    margin-top: 8px;
   }
 
   /* Panels */
@@ -408,10 +407,6 @@
       <span class="panel-count" id="right-count"></span>
     </div>
     <div class="panel-body" id="right-body"></div>
-  </div>
-  <div class="panel personality-panel" id="personality-panel" style="display:none">
-    <canvas id="personality-radar"></canvas>
-    <div class="personality-name" id="personality-name"></div>
   </div>
 </div>
 
@@ -688,8 +683,9 @@ async function refresh() {
 refresh();
 setInterval(refresh, 3000);
 
-// ── Personality radar (read-only) ──
+// ── Personality radar (read-only, embedded in right panel) ──
 let pChart = null;
+let pCardInjected = false;
 const traitLabels = [
   'thoroughness','context_hunger','confidence_threshold','pattern_recognition',
   'risk_tolerance','scope_appetite','test_affinity','creativity','retry_persistence',
@@ -698,11 +694,11 @@ const traitLabels = [
   'autonomy','collaboration','initiative','scope_sensitivity'
 ];
 const shortLabels = [
-  'Thorough','Context','Confidence','Patterns',
-  'Risk','Scope','Tests','Creative','Retry',
-  'Strict','Conformity','Docs','Polish',
-  'Verbose','Explain','Notify','Defensive','Tone',
-  'Autonomy','Collab','Initiative','Scope Sens'
+  'Thorough','Ctx','Conf','Pattern',
+  'Risk','Scope','Test','Create','Retry',
+  'Strict','Conform','Docs','Polish',
+  'Verbose','Explain','Notify','Defend','Tone',
+  'Auto','Collab','Init','Scope S'
 ];
 
 async function loadPersonality() {
@@ -713,9 +709,17 @@ async function loadPersonality() {
     const eff = d.effective;
     if (!eff) return;
 
-    // Show panel and adjust grid
-    document.getElementById('personality-panel').style.display = '';
-    document.querySelector('.main').classList.add('has-personality');
+    // Inject the card at the top of the right panel (once)
+    if (!pCardInjected) {
+      const rbody = document.getElementById('right-body');
+      const card = document.createElement('div');
+      card.className = 'personality-card';
+      card.id = 'personality-card';
+      card.innerHTML = '<canvas id="personality-radar"></canvas>'
+        + '<span class="personality-card-label">Personality</span>';
+      rbody.insertBefore(card, rbody.firstChild);
+      pCardInjected = true;
+    }
 
     const values = traitLabels.map(k => eff[k] || 0);
 
@@ -735,13 +739,12 @@ async function loadPersonality() {
           backgroundColor: 'rgba(88,166,255,0.15)',
           borderColor: 'rgba(88,166,255,0.7)',
           borderWidth: 1.5,
-          pointRadius: 2,
+          pointRadius: 1.5,
           pointBackgroundColor: 'rgba(88,166,255,0.9)',
         }]
       },
       options: {
-        responsive: true,
-        maintainAspectRatio: true,
+        responsive: false,
         plugins: { legend: { display: false } },
         scales: {
           r: {
@@ -751,14 +754,12 @@ async function loadPersonality() {
             angleLines: { color: 'rgba(48,54,61,0.4)' },
             pointLabels: {
               color: '#7d8590',
-              font: { size: 8 }
+              font: { size: 7 }
             }
           }
         }
       }
     });
-
-    document.getElementById('personality-name').textContent = 'personality';
   } catch {}
 }
 
