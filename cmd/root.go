@@ -497,13 +497,14 @@ func runDaemon(cmd *cobra.Command, args []string) error {
 					"question": daemonCounters.triageQuestion.Load(),
 					"other":    daemonCounters.triageOther.Load(),
 				},
-				DigestEnabled: cfg.Digest.Enabled,
-				DigestDryRun:  cfg.Digest.DryRun,
-				IssueTracker:  cfg.IssueTracker.Enabled,
-				IssueProvider: cfg.IssueTracker.Provider,
-				MCPEnabled:    cfg.MCP.Enabled,
-				MCPHost:       cfg.MCP.Host,
-				MCPPort:       cfg.MCP.Port,
+				DigestEnabled:     cfg.Digest.Enabled,
+				DigestDryRun:      cfg.Digest.DryRun,
+				DigestCommentMode: cfg.Digest.CommentInvestigation,
+				IssueTracker:      cfg.IssueTracker.Enabled,
+				IssueProvider:     cfg.IssueTracker.Provider,
+				MCPEnabled:        cfg.MCP.Enabled,
+				MCPHost:           cfg.MCP.Host,
+				MCPPort:           cfg.MCP.Port,
 			}
 			if digestEngine != nil {
 				dstats := digestEngine.Stats()

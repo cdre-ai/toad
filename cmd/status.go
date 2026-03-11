@@ -254,6 +254,7 @@ type apiDaemon struct {
 	TriageByCategory map[string]int64 `json:"triage_by_category,omitempty"`
 	DigestEnabled    bool             `json:"digest_enabled"`
 	DigestDryRun     bool             `json:"digest_dry_run"`
+	DigestComment    bool             `json:"digest_comment_mode,omitempty"`
 	DigestBuffer     int              `json:"digest_buffer"`
 	DigestNextFlush  int64            `json:"digest_next_flush,omitempty"`
 	DigestProcessed  int64            `json:"digest_processed"`
@@ -295,6 +296,7 @@ type apiConfig struct {
 	TimeoutMinutes int             `json:"timeout_minutes"`
 	DigestEnabled  bool            `json:"digest_enabled"`
 	DigestDryRun   bool            `json:"digest_dry_run"`
+	DigestComment  bool            `json:"digest_comment_mode,omitempty"`
 	DigestInterval int             `json:"digest_interval_min,omitempty"`
 	DigestMaxSpawn int             `json:"digest_max_spawn_hour,omitempty"`
 	MCPEnabled     bool            `json:"mcp_enabled"`
@@ -386,6 +388,7 @@ func apiDataHandler(db *state.DB, cfg *config.Config) http.HandlerFunc {
 			daemon.TriageByCategory = daemonStats.TriageByCategory
 			daemon.DigestEnabled = daemonStats.DigestEnabled
 			daemon.DigestDryRun = daemonStats.DigestDryRun
+			daemon.DigestComment = daemonStats.DigestCommentMode
 			daemon.DigestBuffer = daemonStats.DigestBuffer
 			if !daemonStats.DigestNextFlush.IsZero() {
 				daemon.DigestNextFlush = daemonStats.DigestNextFlush.Unix()
@@ -407,7 +410,10 @@ func apiDataHandler(db *state.DB, cfg *config.Config) http.HandlerFunc {
 		digestInt := apiIntegration{Name: "Digest"}
 		if daemon.Running {
 			if daemon.DigestEnabled {
-				if daemon.DigestDryRun {
+				if daemon.DigestDryRun && daemon.DigestComment {
+					digestInt.Status = "comment"
+					digestInt.Detail = "Comment mode"
+				} else if daemon.DigestDryRun {
 					digestInt.Status = "dry-run"
 					digestInt.Detail = "Dry-run"
 				} else {
@@ -563,6 +569,7 @@ func apiDataHandler(db *state.DB, cfg *config.Config) http.HandlerFunc {
 				TimeoutMinutes: cfg.Limits.TimeoutMinutes,
 				DigestEnabled:  cfg.Digest.Enabled,
 				DigestDryRun:   cfg.Digest.DryRun,
+				DigestComment:  cfg.Digest.CommentInvestigation,
 			}
 			for _, r := range cfg.Repos.List {
 				ac.Repos = append(ac.Repos, apiConfigRepo{Name: r.Name, Path: r.Path})

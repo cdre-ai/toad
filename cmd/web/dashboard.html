@@ -296,6 +296,7 @@
   .badge-shipping { background: rgba(76,175,80,0.15); color: var(--green); }
   .badge-starting { background: rgba(125,133,144,0.15); color: var(--dim); }
   .badge-done { background: rgba(76,175,80,0.15); color: var(--green); }
+  .badge-commented { background: rgba(88,166,255,0.12); color: var(--blue); }
   .badge-failed { background: rgba(255,82,82,0.15); color: var(--red); }
   .badge .spinner {
     width: 10px; height: 10px;
@@ -830,7 +831,7 @@ async function refresh() {
       document.getElementById('s-king').textContent = num(dm.digest_opportunities || 0);
       document.getElementById('s-king').style.color = 'var(--green)';
       document.getElementById('s-king-sub').textContent =
-        dm.digest_dry_run ? 'opportunities (dry-run)' : dm.digest_spawns + ' spawned';
+        dm.digest_dry_run ? ('opportunities (' + (dm.digest_comment_mode ? 'comment' : 'dry-run') + ')') : dm.digest_spawns + ' spawned';
     } else {
       document.getElementById('s-king').textContent = 'Off';
       document.getElementById('s-king').style.color = 'var(--dim)';
@@ -924,7 +925,9 @@ async function refresh() {
     if (dm.running) {
       dsec.style.display = '';
       if (dm.digest_enabled) {
-        if (dm.digest_dry_run) {
+        if (dm.digest_dry_run && dm.digest_comment_mode) {
+          document.getElementById('d-status').innerHTML = '<span style="color:var(--blue)">Enabled (comment mode)</span>';
+        } else if (dm.digest_dry_run) {
           document.getElementById('d-status').innerHTML = '<span style="color:var(--amber)">Enabled (dry-run)</span>';
         } else {
           document.getElementById('d-status').innerHTML = '<span style="color:var(--green)">Enabled</span>';
@@ -971,7 +974,8 @@ async function refresh() {
       let ohtml = '';
       if (opps.length === 0) {
         const dryRunMode = (d.config && d.config.digest_dry_run) || (dm.running && dm.digest_dry_run);
-        const modeLabel = dryRunMode ? 'dry-run' : 'live';
+        const commentModeEmpty = (d.config && d.config.digest_comment_mode) || (dm.running && dm.digest_comment_mode);
+        const modeLabel = dryRunMode ? (commentModeEmpty ? 'comment' : 'dry-run') : 'live';
         ohtml = '<div class="empty">Toad King is monitoring your channels (' + modeLabel + ' mode). Opportunities will appear here as they are identified.</div>';
         document.getElementById('opps-wrap').innerHTML = ohtml;
       } else {
@@ -980,10 +984,13 @@ async function refresh() {
           const o = opps[i];
           const hidden = !oppsExpanded && i >= MAX_VISIBLE ? ' display:none;' : '';
           let obadge;
+          const commentMode = (d.config && d.config.digest_comment_mode) || (dm.running && dm.digest_comment_mode);
           if (o.investigating) {
             obadge = '<span class="badge badge-running"><span class="spinner"></span> investigating</span>';
           } else if (o.dismissed) {
             obadge = '<span class="badge badge-failed">dismissed</span>';
+          } else if (o.dry_run && commentMode) {
+            obadge = '<span class="badge badge-commented">commented</span>';
           } else if (o.dry_run) {
             obadge = '<span class="badge badge-validating">dry-run</span>';
           } else {

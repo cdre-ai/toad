@@ -266,6 +266,7 @@
     font-size: 11px; font-weight: 600;
   }
   .opp-badge.dry-run { background: rgba(255,193,7,0.12); color: var(--amber); }
+  .opp-badge.commented { background: rgba(88,166,255,0.12); color: var(--blue); }
   .opp-badge.spawned { background: rgba(76,175,80,0.12); color: var(--green); }
   .opp-badge.dismissed { background: rgba(125,133,144,0.1); color: var(--dim); }
   .opp-badge.investigating { background: rgba(88,166,255,0.12); color: var(--blue); }
@@ -514,7 +515,7 @@ async function refresh() {
     }
     // Digest
     if (dm.digest_enabled) {
-      const mode = dm.digest_dry_run ? 'dry-run' : 'live';
+      const mode = dm.digest_dry_run ? (dm.digest_comment_mode ? 'comment' : 'dry-run') : 'live';
       tiles.push({val: dm.digest_opportunities || 0, label: 'Opportunities', sub: dm.digest_processed + ' processed (' + mode + ')', cls: dm.digest_opportunities > 0 ? 'c-amber' : 'c-dim'});
     }
     // Watches
@@ -615,6 +616,7 @@ async function refresh() {
         let badge;
         if (o.investigating) badge = '<span class="opp-badge investigating"><span class="spinner"></span> investigating</span>';
         else if (o.dismissed) badge = '<span class="opp-badge dismissed">dismissed</span>';
+        else if (o.dry_run && dm.digest_comment_mode) badge = '<span class="opp-badge commented">commented</span>';
         else if (o.dry_run) badge = '<span class="opp-badge dry-run">dry-run</span>';
         else badge = '<span class="opp-badge spawned">spawned</span>';
 
