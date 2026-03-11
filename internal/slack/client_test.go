@@ -326,6 +326,30 @@ func TestSpawnedByBlocks(t *testing.T) {
 	}
 }
 
+func TestSpawnedByBlocks_ProcessingState(t *testing.T) {
+	text := "Found a bug in utils/time.go"
+	origBlocks := FixThisBlocks(text, "1234567890.123456")
+	orig := goslack.Blocks{BlockSet: origBlocks}
+
+	blocks := SpawnedByBlocks(orig, "")
+
+	if len(blocks) != 2 {
+		t.Fatalf("expected 2 blocks (section + context), got %d", len(blocks))
+	}
+
+	ctx, ok := blocks[1].(*goslack.ContextBlock)
+	if !ok {
+		t.Fatalf("expected ContextBlock, got %T", blocks[1])
+	}
+	ctxText, ok := ctx.ContextElements.Elements[0].(*goslack.TextBlockObject)
+	if !ok {
+		t.Fatalf("expected TextBlockObject, got %T", ctx.ContextElements.Elements[0])
+	}
+	if ctxText.Text != ":hourglass_flowing_sand: Spawning tadpole..." {
+		t.Errorf("unexpected processing text: %q", ctxText.Text)
+	}
+}
+
 func TestParseInteraction_FixButton(t *testing.T) {
 	cb := &goslack.InteractionCallback{
 		Type: goslack.InteractionTypeBlockActions,

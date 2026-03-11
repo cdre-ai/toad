@@ -38,23 +38,29 @@ func handleInteractive(ctx context.Context, c *Client, evt socketmode.Event) {
 
 	slog.Info("fix button clicked", "channel", channel, "user", userID, "thread", threadTS)
 
-	// Update the message: keep original section blocks, replace the button with a context line.
-	userName := c.ResolveUserName(userID)
-	blocks := SpawnedByBlocks(cb.Message.Blocks, userName)
-	if err := c.UpdateMessageWithBlocks(channel, cb.MessageTs, cb.Message.Text, blocks); err != nil {
+	// Instant feedback: replace button with processing indicator before any API calls.
+	processingBlocks := SpawnedByBlocks(cb.Message.Blocks, "")
+	if err := c.UpdateMessageWithBlocks(channel, cb.MessageTs, cb.Message.Text, processingBlocks); err != nil {
 		slog.Warn("failed to update button message", "error", err)
 	}
 
-	// Build an IncomingMessage for the original thread and dispatch as tadpole request
-	msg, err := c.FetchMessage(channel, threadTS)
-	if err != nil {
-		slog.Error("failed to fetch thread message for fix button", "error", err)
-		return
-	}
-	msg.IsTriggered = true
-	msg.IsTadpoleRequest = true
+	go func() {
+		userName := c.ResolveUserName(userID)
+		finalBlocks := SpawnedByBlocks(cb.Message.Blocks, userName)
+		if err := c.UpdateMessageWithBlocks(channel, cb.MessageTs, cb.Message.Text, finalBlocks); err != nil {
+			slog.Warn("failed to update button message", "error", err)
+		}
 
-	if c.handler != nil {
-		c.handler(ctx, msg)
-	}
+		msg, err := c.FetchMessage(channel, threadTS)
+		if err != nil {
+			slog.Error("failed to fetch thread message for fix button", "error", err)
+			return
+		}
+		msg.IsTriggered = true
+		msg.IsTadpoleRequest = true
+
+		if c.handler != nil {
+			c.handler(ctx, msg)
+		}
+	}()
 }
