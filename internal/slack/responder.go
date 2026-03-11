@@ -33,9 +33,12 @@ func SpawnedByBlocks(origBlocks slack.Blocks, userName string) []slack.Block {
 			result = append(result, b)
 		}
 	}
+	statusText := ":hatching_chick: Tadpole spawned by " + userName
+	if userName == "" {
+		statusText = ":hourglass_flowing_sand: Spawning tadpole..."
+	}
 	result = append(result, slack.NewContextBlock("toad_fix_status",
-		slack.NewTextBlockObject(slack.MarkdownType,
-			":hatching_chick: Tadpole spawned by "+userName, false, false),
+		slack.NewTextBlockObject(slack.MarkdownType, statusText, false, false),
 	))
 	return result
 }
