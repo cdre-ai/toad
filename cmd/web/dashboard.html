@@ -1216,8 +1216,9 @@ async function loadDevInfo() {
     document.getElementById('dev-home').textContent = d.toad_home || 'N/A';
   } catch(e) { console.error('dev info failed', e); }
 }
-function devDownloadLog() { window.open('/api/dev/download-log', '_blank'); }
-function devDownloadDB() { window.open('/api/dev/download-db', '_blank'); }
+function devDownload(url) { const a = document.createElement('a'); a.href = url; a.download = ''; document.body.appendChild(a); a.click(); a.remove(); }
+function devDownloadLog() { devDownload('/api/dev/download-log'); }
+function devDownloadDB() { devDownload('/api/dev/download-db'); }
 async function devResetLog() {
   if (!confirm('This will permanently delete the log file. Continue?')) return;
   try {
