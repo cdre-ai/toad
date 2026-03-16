@@ -374,3 +374,150 @@ func formatWatches(watches []*state.PRWatch) string {
 	}
 	return strings.TrimRight(b.String(), "\n")
 }
+
+// DBQuerier abstracts read-only database queries for testability.
+type DBQuerier interface {
+	QueryContext(ctx context.Context, query string, args ...interface{}) (RowScanner, error)
+}
+
+// RowScanner abstracts sql.Rows for testability.
+type RowScanner interface {
+	Columns() ([]string, error)
+	Next() bool
+	Scan(dest ...interface{}) error
+	Close() error
+	Err() error
+}
+
+type queryArgs struct {
+	SQL   string `json:"sql" jsonschema:"Read-only SQL query to execute against the toad state database"`
+	Limit int    `json:"limit,omitempty" jsonschema:"Maximum rows to return (default 100, max 1000)"`
+}
+
+// RegisterQueryTool registers a read-only SQL query tool on the given MCP server.
+func RegisterQueryTool(srv *gomcp.Server, db *state.DB) {
+	gomcp.AddTool(srv, &gomcp.Tool{
+		Name: "query",
+		Description: `Execute a read-only SQL query against the toad state database. Dev-only access.
+
+Tables: runs, thread_memory, pr_watches, daemon_stats, settings, personality_adjustments
+
+personality_adjustments columns: id, trait, delta, source, trigger_detail, reasoning, before_value, after_value, created_at
+runs columns: id, status, slack_channel, slack_thread, branch, worktree_path, task, repo_name, claim_scope, started_at, result_json, updated_at
+pr_watches columns: pr_number, pr_url, branch, run_id, slack_channel, slack_thread, last_comment_id, fix_count, ci_fix_count, conflict_fix_count, repo_path, ci_exhausted_notified, created_at, closed, final_state, original_summary, original_description`,
+	}, func(ctx context.Context, req *gomcp.CallToolRequest, args queryArgs) (*gomcp.CallToolResult, any, error) {
+		tok := tokenFromContext(ctx)
+		if tok == nil || tok.Role != "dev" {
+			return nil, nil, fmt.Errorf("access denied: dev role required")
+		}
+
+		sql := strings.TrimSpace(args.SQL)
+		if sql == "" {
+			return &gomcp.CallToolResult{
+				Content: []gomcp.Content{&gomcp.TextContent{Text: "Please provide a SQL query."}},
+				IsError: true,
+			}, nil, nil
+		}
+
+		// Block write operations.
+		upper := strings.ToUpper(sql)
+		for _, kw := range []string{"INSERT", "UPDATE", "DELETE", "DROP", "ALTER", "CREATE", "REPLACE", "ATTACH", "DETACH", "VACUUM", "REINDEX"} {
+			if strings.Contains(upper, kw) {
+				return &gomcp.CallToolResult{
+					Content: []gomcp.Content{&gomcp.TextContent{Text: "Only read-only (SELECT) queries are allowed."}},
+					IsError: true,
+				}, nil, nil
+			}
+		}
+
+		limit := args.Limit
+		if limit <= 0 {
+			limit = 100
+		}
+		if limit > 1000 {
+			limit = 1000
+		}
+
+		queryCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
+		defer cancel()
+
+		rows, err := db.QueryContext(queryCtx, sql)
+		if err != nil {
+			return &gomcp.CallToolResult{
+				Content: []gomcp.Content{&gomcp.TextContent{Text: "Query error: " + err.Error()}},
+				IsError: true,
+			}, nil, nil
+		}
+		defer rows.Close()
+
+		cols, err := rows.Columns()
+		if err != nil {
+			return &gomcp.CallToolResult{
+				Content: []gomcp.Content{&gomcp.TextContent{Text: "Column error: " + err.Error()}},
+				IsError: true,
+			}, nil, nil
+		}
+
+		var b strings.Builder
+		b.WriteString(strings.Join(cols, " | "))
+		b.WriteString("\n")
+		b.WriteString(strings.Repeat("-", len(b.String())-1))
+		b.WriteString("\n")
+
+		count := 0
+		for rows.Next() && count < limit {
+			values := make([]interface{}, len(cols))
+			ptrs := make([]interface{}, len(cols))
+			for i := range values {
+				ptrs[i] = &values[i]
+			}
+			if err := rows.Scan(ptrs...); err != nil {
+				return &gomcp.CallToolResult{
+					Content: []gomcp.Content{&gomcp.TextContent{Text: "Scan error: " + err.Error()}},
+					IsError: true,
+				}, nil, nil
+			}
+			for i, v := range values {
+				if i > 0 {
+					b.WriteString(" | ")
+				}
+				switch val := v.(type) {
+				case nil:
+					b.WriteString("NULL")
+				case []byte:
+					s := string(val)
+					if len(s) > 200 {
+						s = s[:200] + "..."
+					}
+					b.WriteString(s)
+				default:
+					s := fmt.Sprintf("%v", val)
+					if len(s) > 200 {
+						s = s[:200] + "..."
+					}
+					b.WriteString(s)
+				}
+			}
+			b.WriteString("\n")
+			count++
+		}
+
+		if err := rows.Err(); err != nil {
+			b.WriteString("\nRow iteration error: " + err.Error())
+		}
+
+		if count == 0 {
+			return &gomcp.CallToolResult{
+				Content: []gomcp.Content{&gomcp.TextContent{Text: "No rows returned."}},
+			}, nil, nil
+		}
+
+		if count >= limit {
+			fmt.Fprintf(&b, "\n(limited to %d rows)", limit)
+		}
+
+		return &gomcp.CallToolResult{
+			Content: []gomcp.Content{&gomcp.TextContent{Text: b.String()}},
+		}, nil, nil
+	})
+}
