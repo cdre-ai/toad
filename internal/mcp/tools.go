@@ -419,15 +419,15 @@ pr_watches columns: pr_number, pr_url, branch, run_id, slack_channel, slack_thre
 			}, nil, nil
 		}
 
-		// Block write operations.
+		// Block write operations by checking for keywords as whole words
+		// (not substrings of identifiers like "personality_adjustments").
 		upper := strings.ToUpper(sql)
-		for _, kw := range []string{"INSERT", "UPDATE", "DELETE", "DROP", "ALTER", "CREATE", "REPLACE", "ATTACH", "DETACH", "VACUUM", "REINDEX"} {
-			if strings.Contains(upper, kw) {
-				return &gomcp.CallToolResult{
-					Content: []gomcp.Content{&gomcp.TextContent{Text: "Only read-only (SELECT) queries are allowed."}},
-					IsError: true,
-				}, nil, nil
-			}
+		writeRe := regexp.MustCompile(`\b(INSERT|UPDATE|DELETE|DROP|ALTER|CREATE|REPLACE|ATTACH|DETACH|VACUUM|REINDEX)\b`)
+		if writeRe.MatchString(upper) {
+			return &gomcp.CallToolResult{
+				Content: []gomcp.Content{&gomcp.TextContent{Text: "Only read-only (SELECT) queries are allowed."}},
+				IsError: true,
+			}, nil, nil
 		}
 
 		limit := args.Limit
