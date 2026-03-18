@@ -106,7 +106,17 @@ func (r *Runner) Execute(ctx context.Context, task Task) error {
 			Error:    reason,
 			Duration: time.Since(start),
 		})
-		r.updateStatus(task, statusTS, ":x: Tadpole failed — "+reason)
+		// Post failure with retry CTA button
+		failText := ":x: Tadpole failed — " + reason
+		if r.slack != nil && task.SlackChannel != "" && statusTS != "" {
+			blocks := islack.FixThisBlocks(failText, task.SlackThreadTS)
+			if err := r.slack.UpdateMessageWithBlocks(task.SlackChannel, statusTS, failText, blocks); err != nil {
+				slog.Warn("failed to update status with retry button", "error", err)
+				r.updateStatus(task, statusTS, failText)
+			}
+		} else {
+			r.updateStatus(task, statusTS, failText)
+		}
 		r.swapReact(task, "hatching_chick", "x")
 		return fmt.Errorf("tadpole failed: %s", reason)
 	}
