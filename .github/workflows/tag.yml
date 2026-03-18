@@ -1,0 +1,116 @@
+name: Tag Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Version to tag (e.g. 0.1.101 or v0.1.101)"
+        required: true
+        type: string
+      bump:
+        description: "Or auto-bump from latest tag"
+        required: false
+        type: choice
+        default: "manual"
+        options:
+          - manual
+          - patch
+          - minor
+          - major
+
+permissions:
+  contents: write
+
+jobs:
+  tag:
+    name: Validate & Tag
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Determine version
+        id: version
+        run: |
+          if [ "${{ inputs.bump }}" != "manual" ]; then
+            # Auto-bump from latest tag
+            LATEST=$(git tag --list 'v*' --sort=-v:refname | head -1)
+            if [ -z "$LATEST" ]; then
+              echo "::error::No existing tags found for auto-bump"
+              exit 1
+            fi
+
+            # Strip v prefix and split
+            NUMS="${LATEST#v}"
+            MAJOR=$(echo "$NUMS" | cut -d. -f1)
+            MINOR=$(echo "$NUMS" | cut -d. -f2)
+            PATCH=$(echo "$NUMS" | cut -d. -f3)
+
+            case "${{ inputs.bump }}" in
+              patch) PATCH=$((PATCH + 1)) ;;
+              minor) MINOR=$((MINOR + 1)); PATCH=0 ;;
+              major) MAJOR=$((MAJOR + 1)); MINOR=0; PATCH=0 ;;
+            esac
+
+            VERSION="v${MAJOR}.${MINOR}.${PATCH}"
+            echo "Auto-bumped from $LATEST to $VERSION (${{ inputs.bump }})"
+          else
+            VERSION="${{ inputs.version }}"
+
+            # Normalize: add v prefix if missing
+            if [[ ! "$VERSION" =~ ^v ]]; then
+              VERSION="v${VERSION}"
+            fi
+          fi
+
+          # Validate semantic version format: vMAJOR.MINOR.PATCH
+          if [[ ! "$VERSION" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "::error::Invalid version format '$VERSION'. Must be vMAJOR.MINOR.PATCH (e.g. v0.1.101)"
+            exit 1
+          fi
+
+          # Check tag doesn't already exist
+          if git rev-parse "$VERSION" >/dev/null 2>&1; then
+            echo "::error::Tag $VERSION already exists"
+            exit 1
+          fi
+
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "Version: $VERSION"
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Pre-flight checks
+        run: |
+          echo "::group::Build"
+          go build ./...
+          echo "::endgroup::"
+
+          echo "::group::Test"
+          go test -race ./...
+          echo "::endgroup::"
+
+          echo "::group::Vet"
+          go vet ./...
+          echo "::endgroup::"
+
+          echo "::group::Format"
+          UNFORMATTED=$(gofmt -l .)
+          if [ -n "$UNFORMATTED" ]; then
+            echo "::error::Unformatted files: $UNFORMATTED"
+            exit 1
+          fi
+          echo "::endgroup::"
+
+      - name: Create and push tag
+        run: |
+          git tag "${{ steps.version.outputs.version }}"
+          git push origin "${{ steps.version.outputs.version }}"
+          echo "### Tagged ${{ steps.version.outputs.version }} :rocket:" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "This will trigger the [Release workflow](../actions/workflows/release.yml) automatically." >> "$GITHUB_STEP_SUMMARY"
