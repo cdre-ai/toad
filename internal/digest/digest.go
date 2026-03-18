@@ -1126,14 +1126,9 @@ func (e *Engine) passesGuardrails(opp Opportunity) bool {
 		}
 	}
 	// In comment mode (dry-run + comment investigation), lower the floor —
-	// posting investigation findings has no downside, so we can be more inclusive.
+	// posting investigation findings has no downside so we can be more inclusive.
 	if e.cfg != nil && e.cfg.DryRun && e.cfg.CommentInvestigation && minConf > 0.85 {
 		minConf = 0.85
-	}
-	// In comment mode (dry-run + comment investigation), lower the floor slightly —
-	// posting investigation findings has no downside so we can be more inclusive.
-	if e.cfg != nil && e.cfg.DryRun && e.cfg.CommentInvestigation && minConf > 0.90 {
-		minConf = 0.90
 	}
 	if opp.Confidence < minConf {
 		return false
