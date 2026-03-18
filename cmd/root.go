@@ -976,9 +976,13 @@ func handleTriggered(
 	}
 
 	daemonCounters.ribbits.Add(1)
-	blocks := islack.FixThisBlocks(resp.Text, msg.ThreadTS())
-	if _, err := slackClient.ReplyInThreadWithBlocks(msg.Channel, msg.ThreadTS(), resp.Text, blocks); err != nil {
-		slog.Warn("ribbit reply failed", "error", err)
+	if result.Category == "bug" || result.Category == "feature" {
+		blocks := islack.FixThisBlocks(resp.Text, msg.ThreadTS())
+		if _, err := slackClient.ReplyInThreadWithBlocks(msg.Channel, msg.ThreadTS(), resp.Text, blocks); err != nil {
+			slog.Warn("ribbit reply failed", "error", err)
+		}
+	} else {
+		slackClient.ReplyInThread(msg.Channel, msg.ThreadTS(), resp.Text)
 	}
 	slackClient.SwapReaction(msg.Channel, msg.Timestamp, "eyes", "speech_balloon")
 }
