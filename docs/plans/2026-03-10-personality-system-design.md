@@ -1,3 +1,5 @@
+> **Status: COMPLETED** — This feature has been implemented and is running in production.
+
 # Toad Personality System — Design Spec
 
 ## Overview

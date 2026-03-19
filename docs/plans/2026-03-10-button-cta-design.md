@@ -1,3 +1,5 @@
+> **Status: COMPLETED** — This feature has been implemented and is running in production.
+
 # Design: Slack Button CTA for Passive Ribbits
 
 ## Problem

@@ -1,3 +1,5 @@
+> **Status: COMPLETED** — This feature has been implemented and is running in production.
+
 # Toad MCP Server Implementation Plan
 
 > **For Claude:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task.

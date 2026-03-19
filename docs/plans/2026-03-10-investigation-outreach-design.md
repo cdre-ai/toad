@@ -1,3 +1,5 @@
+> **Status: COMPLETED** — This feature has been implemented and is running in production.
+
 # Investigation Outreach for Bot Messages
 
 **Date:** 2026-03-10

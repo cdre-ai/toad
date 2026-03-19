@@ -509,6 +509,62 @@ func TestEnrichWithIssueDetails_TruncatesLongDescription(t *testing.T) {
 	}
 }
 
+func TestExtractFilePaths_RealTaskSpec(t *testing.T) {
+	spec := "In `web-app/app/Charts/Controllers/CertificationChartsController.php`, fix the `getColorsForEnergyLabelCertificationType()` method:\n\n1. Add `'A1' => '#4ADE80'` to the `$colorPerLevel` map"
+	paths := extractFilePaths(spec)
+	if len(paths) != 1 {
+		t.Fatalf("expected 1 path, got %d: %v", len(paths), paths)
+	}
+	if paths[0] != "web-app/app/Charts/Controllers/CertificationChartsController.php" {
+		t.Errorf("unexpected path: %s", paths[0])
+	}
+}
+
+func TestExtractFilePaths_MultiplePaths(t *testing.T) {
+	spec := "Change `esg-api/app/reporting/gresb/gresb_inputs/_gresb_config_vars_mappings.py` and `esg-api/app/reporting/gresb/gresb_helpers.py`"
+	paths := extractFilePaths(spec)
+	if len(paths) != 2 {
+		t.Fatalf("expected 2 paths, got %d: %v", len(paths), paths)
+	}
+}
+
+func TestExtractFilePaths_IgnoresVagueHints(t *testing.T) {
+	// Triage-style hints without "/" are not file paths
+	paths := extractFilePaths("certification-timeline chart request handler")
+	if len(paths) != 0 {
+		t.Fatalf("expected 0 paths from vague hints, got %d: %v", len(paths), paths)
+	}
+}
+
+func TestExtractFilePaths_IgnoresURLs(t *testing.T) {
+	paths := extractFilePaths("See https://github.com/org/repo/blob/main/app/foo.py for details")
+	if len(paths) != 0 {
+		t.Fatalf("expected 0 paths from URLs, got %d: %v", len(paths), paths)
+	}
+}
+
+func TestExtractFilePaths_IgnoresBareFilenames(t *testing.T) {
+	// No directory separator — could be anything
+	paths := extractFilePaths("Fix Handler.php and config.yaml")
+	if len(paths) != 0 {
+		t.Fatalf("expected 0 paths from bare filenames, got %d: %v", len(paths), paths)
+	}
+}
+
+func TestExtractFilePaths_Empty(t *testing.T) {
+	if paths := extractFilePaths(""); paths != nil {
+		t.Fatalf("expected nil, got %v", paths)
+	}
+}
+
+func TestExtractFilePaths_Deduplicates(t *testing.T) {
+	spec := "Change `app/models/user.go` first, then update `app/models/user.go` again"
+	paths := extractFilePaths(spec)
+	if len(paths) != 1 {
+		t.Fatalf("expected 1 deduplicated path, got %d: %v", len(paths), paths)
+	}
+}
+
 // helpers
 
 func contains(s, substr string) bool {
