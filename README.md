@@ -120,10 +120,13 @@ Toad connects to Slack via Socket Mode, auto-joins public channels, and starts l
 
 ```
 cmd/
-  root.go          Daemon, message routing
+  root.go          Daemon bootstrap, initialization
+  handlers.go      Message routing, triggered/passive/tadpole handlers
+  investigation.go Investigation prompts, parsing, ticket formatting
+  helpers.go       Utilities, repo sync, VCS resolver
   run.go           CLI one-shot mode
   init.go          Setup wizard
-  status.go        Web dashboard
+  status.go        Web dashboard + dev mode
 
 internal/
   slack/           Socket Mode client, event routing, dedup
@@ -147,7 +150,7 @@ Three packages use a provider/plugin pattern for extensibility. See the `PROVIDE
 
 - **Single binary, zero infra** — Go binary, git worktrees, your Claude subscription. No Docker, no cloud.
 - **Three-tier intelligence** — Haiku for triage (~$0.001), Sonnet for investigation (read-only), Sonnet for execution (full tools).
-- **6-layer guardrails on proactive spawning** — disabled by default, 0.95 confidence threshold, category + size restrictions, hourly cap, existing validation + human PR review.
+- **6-layer guardrails on proactive spawning** — disabled by default, personality-driven confidence threshold (0.85 in comment mode, ~0.95 otherwise), category + size restrictions, hourly cap, existing validation + human PR review.
 - **Write-through state** — in-memory cache + SQLite for crash recovery and dashboard.
 - **MCP server** — optional Streamable HTTP endpoint lets Claude Desktop and Claude Code query toad (ask questions, read logs) via authenticated tokens managed through Slack.
 
@@ -165,6 +168,7 @@ Toad includes an optional MCP (Model Context Protocol) server that lets Claude D
 - `ask` — Ask toad a codebase question (uses ribbit engine with read-only tools)
 - `logs` — Read and filter daemon logs (dev role required)
 - `watches` — List open PR watches being monitored (dev role required)
+- `query` — Execute read-only SQL against the state database (dev role required)
 
 > For full setup instructions, see the **[Setup Guide](SETUP.md#mcp-server)**.
 

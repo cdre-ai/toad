@@ -254,6 +254,20 @@ func (r *Runner) Execute(ctx context.Context, task Task) error {
 			return fail("net-zero diff against " + repo.DefaultBranch + " — fix reverted the original changes")
 		}
 
+		// Guard: if the agent left unstaged/uncommitted changes, auto-commit them.
+		// This catches agents that modify files but forget to stage+commit.
+		if err := autoCommitIfNeeded(ctx, wt.Path); err != nil {
+			return fail(fmt.Sprintf("auto-commit: %s", err))
+		}
+
+		// Guard: verify there are new commits to push vs the remote branch.
+		// git push succeeds silently with exit 0 when there's nothing to push,
+		// so we must check explicitly to avoid claiming success without changes.
+		commitCheck, err := gitOutput(ctx, wt.Path, "log", "origin/"+wt.Branch+"..HEAD", "--oneline")
+		if err == nil && strings.TrimSpace(commitCheck) == "" {
+			return fail("no new commits to push — agent modified files but did not produce any commits")
+		}
+
 		// Review fix: just push to existing branch, PR already exists
 		r.updateStatus(task, statusTS, ":rocket: Pushing fix...")
 		if err := pushBranch(ctx, wt.Path, wt.Branch); err != nil {

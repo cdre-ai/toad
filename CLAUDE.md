@@ -43,23 +43,40 @@ Toad is a Go daemon that monitors Slack channels, triages messages with Claude H
 - **Channel access**: Bot auto-joins all public channels on startup. If `channels` config is empty, no filtering — events from all joined channels are processed.
 
 **Packages:**
-- `cmd/` — Cobra commands: `toad` (daemon), `toad run` (CLI one-shot), `toad init` (setup), `toad status`
+- `cmd/` — Cobra commands: `toad` (daemon), `toad run` (CLI one-shot), `toad init` (setup), `toad status`. Daemon logic split into `root.go` (bootstrap), `handlers.go` (message routing), `investigation.go` (prompts/parsing), `helpers.go` (utilities)
 - `internal/slack/` — Socket Mode client, event routing, dedup, reply tracking
 - `internal/triage/` — Haiku classification (actionable, category, size, keywords, files)
-- `internal/ribbit/` — Sonnet with read-only tools, thread memory context
-- `internal/tadpole/` — Worktree, Claude runner, validation, shipping, pool
+- `internal/ribbit/` — Sonnet with read-only tools, thread memory context, retry on empty result
+- `internal/tadpole/` — Worktree, Claude runner, validation, pre-flight diff check, shipping, pool
 - `internal/state/` — In-memory + SQLite state, crash recovery
 - `internal/reviewer/` — Poll GitHub for PR review comments, spawn fix tadpoles
-- `internal/digest/` — Toad King: batch messages, Haiku analysis, auto-spawn with guardrails
+- `internal/digest/` — Toad King: batch messages, Haiku analysis, auto-spawn with guardrails. Split into `digest.go` (engine), `analyze.go` (LLM analysis), `chunking.go` (batching), `guardrails.go` (filtering)
 - `internal/config/` — YAML config loading with cascading defaults, multi-repo profiles and resolver
+- `internal/personality/` — 22-trait adaptive behavior system with outcome-based learning, dampening, and drift caps (±0.30)
+- `internal/agent/` — Agent CLI abstraction (Claude Code subprocess), provider interface for swappable backends
+- `internal/vcs/` — VCS provider abstraction (GitHub via `gh`, GitLab via `gitlab`), PR operations, CI status, suggested reviewers
+- `internal/issuetracker/` — Linear integration: issue extraction, detail+comment fetching, assignee gating, crossposting
+- `internal/mcp/` — Model Context Protocol server: `ask`, `logs`, `watches`, `query` tools with token auth
 - `internal/tui/` — Shared huh theme for init wizard
+- `internal/update/` — Auto-update mechanism via Homebrew
+- `internal/log/` — Structured logging setup (slog with optional file output)
+- `internal/preflight/` — Pre-run validation checks
+- `internal/toadpath/` — Home directory resolution (`~/.toad` or `$TOAD_HOME`)
 
 ## Important Details
 
 - Claude is invoked as a CLI subprocess (`claude --print --output-format json`), not via API
-- Tadpoles use `--dangerously-skip-permissions`, ribbit uses `--allowedTools Read,Glob,Grep`
-- SQLite uses `modernc.org/sqlite` (pure Go, no CGo) with WAL mode
+- Tadpoles use `--permission-mode acceptEdits --allowedTools Read,Write,Edit,Glob,Grep,Bash,Agent`, ribbit uses `--allowedTools Read,Glob,Grep`
+- SQLite uses `modernc.org/sqlite` (pure Go, no CGo) with WAL mode; `dbRetry` wrapper retries on SQLITE_BUSY
 - Config loads: defaults -> `~/.toad/config.yaml` -> `.toad.yaml` -> env vars
 - All Slack tokens come from env vars (`TOAD_SLACK_APP_TOKEN`, `TOAD_SLACK_BOT_TOKEN`) or `.toad.yaml`
+- Slack API calls have a 30-second HTTP timeout to prevent hung goroutines
 - State DB at `~/.toad/state.db`, worktrees at `~/.toad/worktrees/`
 - On startup, `RecoverOnStartup` marks stale runs as failed and cleans orphaned worktrees
+- Personality traits have a learned cap of ±0.30 from baseline; balanced positive/negative signals on PR merge/close
+- Tadpoles check diff vs main after validation but before shipping to catch already-fixed issues early
+- Ribbit retries once on empty result (with +5 max_turns if first attempt hit max turns)
+- Digest confidence floor is 0.85 in comment mode (dry-run + comment investigation); personality-driven otherwise
+- CTA "Let Toad fix this" buttons appear on bug/feature ribbits, investigation findings, and failure messages
+- Linear ticket comments (up to 20) are fetched alongside issue details for investigation context
+- GitHub Actions: `tag.yml` (manual version tagging with auto-bump) triggers `release.yml` (GoReleaser + Docker)

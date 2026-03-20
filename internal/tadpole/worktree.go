@@ -121,6 +121,29 @@ func CheckoutWorktree(ctx context.Context, repoPath, branch string) (*WorktreeRe
 	return &WorktreeResult{Path: wtPath, Branch: branch, BaseCommit: baseCommit}, nil
 }
 
+// autoCommitIfNeeded stages and commits any dirty working tree changes.
+// This catches agents that modify files but forget to run git add/commit.
+// Returns nil if the working tree is already clean.
+func autoCommitIfNeeded(ctx context.Context, worktreePath string) error {
+	// Check for any unstaged or staged-but-uncommitted changes
+	status, err := gitOutput(ctx, worktreePath, "status", "--porcelain")
+	if err != nil {
+		return fmt.Errorf("checking git status: %w", err)
+	}
+	if strings.TrimSpace(status) == "" {
+		return nil // clean working tree
+	}
+
+	slog.Warn("agent left uncommitted changes, auto-committing", "path", worktreePath)
+	if err := gitRunCtx(ctx, worktreePath, "add", "-A"); err != nil {
+		return fmt.Errorf("staging changes: %w", err)
+	}
+	if err := gitRunCtx(ctx, worktreePath, "commit", "-m", "Apply review fix changes"); err != nil {
+		return fmt.Errorf("committing changes: %w", err)
+	}
+	return nil
+}
+
 // pushBranch pushes the current branch to origin without creating a PR.
 // Uses --force-with-lease so pushes succeed after rebases while still
 // protecting against overwriting concurrent changes.

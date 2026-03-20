@@ -859,10 +859,12 @@ digest:
 5. Gradually relax: add `feature` to `allowed_categories`, increase `max_auto_spawn_hour`
 
 **Guardrails:**
-- `min_confidence: 0.95` — only spawn when Haiku is very confident
+- `min_confidence: 0.95` — only spawn when Haiku is very confident (automatically lowered to 0.85 in comment mode since posting findings has no downside)
 - `allowed_categories: [bug]` — start with bugs only (most predictable)
 - `max_est_size: small` — only tiny/small tasks (less risk of large, wrong changes)
 - `max_auto_spawn_hour: 3` — rate limit to prevent runaway spawning
+
+**Comment mode** (`dry_run: true` + `comment_investigation: true`): Toad investigates opportunities and posts findings with a "Let Toad fix this" CTA button, but doesn't auto-spawn tadpoles. Users click the button to trigger a fix. This is the recommended starting configuration — it combines passive detection with human-in-the-loop control.
 
 ---
 
@@ -923,7 +925,9 @@ The MCP server lets Claude Desktop and Claude Code interact with your toad insta
 
 **Available tools:**
 - **ask** — Ask toad a codebase question. Uses the ribbit engine with read-only tools (Glob, Grep, Read). Supports multi-turn conversation context per user.
-- **logs** — Read and filter daemon log lines. Supports line count, level filtering, and regex search. Requires `dev` role.
+- **logs** — Read and filter daemon log lines. Supports line count, level filtering, regex search, and time filtering. Requires `dev` role.
+- **watches** — List open PR watches being monitored by the review watcher. Requires `dev` role.
+- **query** — Execute read-only SQL against the toad state database (runs, pr_watches, personality_adjustments, etc.). Requires `dev` role.
 
 **Slash commands:**
 | Command | Description |
