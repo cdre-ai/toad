@@ -412,11 +412,11 @@ func (r *Runner) swapReact(task Task, remove, add string) {
 }
 
 // setStatus shows a Slack thinking indicator for the current phase.
-func (r *Runner) setStatus(task Task, status string, loadingMessages ...string) {
+func (r *Runner) setStatus(task Task, status string) {
 	if r.slack == nil || task.SlackChannel == "" || task.SlackThreadTS == "" {
 		return
 	}
-	r.slack.SetStatus(task.SlackChannel, task.SlackThreadTS, status, loadingMessages...)
+	r.slack.SetStatus(task.SlackChannel, task.SlackThreadTS, status)
 }
 
 // clearStatus explicitly clears the Slack thinking indicator.

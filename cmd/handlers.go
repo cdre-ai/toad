@@ -315,6 +315,7 @@ func handleTriggered(
 					SlackPermalink: permalink,
 				})
 				if gate.Gated {
+					slackClient.ClearStatus(msg.Channel, threadTS)
 					if gate.Done {
 						slog.Info("ticket is done, skipping silently",
 							"issue", issueRef.ID, "state", gate.Status.State)
