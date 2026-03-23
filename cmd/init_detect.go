@@ -26,7 +26,7 @@ func detectRepoDefaults(repoPath string) repoDefaults {
 		abs = repoPath
 	}
 
-	d := repoDefaults{DefaultBranch: "main"}
+	d := repoDefaults{DefaultBranch: defaultBranchFallback}
 	d.Stack, d.Module = config.DetectStack(abs)
 	d.Description = config.ReadREADMEFirstParagraph(abs)
 	d.TestCommand, d.LintCommand = suggestCommands(d.Stack, abs)
@@ -59,8 +59,10 @@ func detectDefaultBranch(repoPath string) string {
 		}
 	}
 
-	return "main"
+	return defaultBranchFallback
 }
+
+const defaultBranchFallback = "main"
 
 // suggestCommands returns suggested test and lint commands based on detected stack.
 func suggestCommands(stack, repoPath string) (testCmd, lintCmd string) {
