@@ -514,13 +514,12 @@ func handleTadpoleRequest(
 		return
 	}
 
-	// Re-triage the thread content to get summary/category/size
-	threadText := ""
-	if len(threadMsgs) > 0 {
-		threadText = threadMsgs[0] // original message
-	}
-	if threadText == "" {
-		threadText = msg.Text
+	// Use the incoming message text as the primary context. For CTA button clicks
+	// this is the investigation finding (not the thread root), so the tadpole knows
+	// exactly what to fix.
+	threadText := msg.Text
+	if threadText == "" && len(threadMsgs) > 0 {
+		threadText = threadMsgs[0]
 	}
 
 	// Enrich thread context by resolving any Linear ticket URLs/references

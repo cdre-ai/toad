@@ -50,6 +50,11 @@ func handleInteractive(ctx context.Context, c *Client, evt socketmode.Event) {
 		slog.Warn("failed to update button message", "error", err)
 	}
 
+	// The button's message text is the investigation finding — use it as the
+	// primary text so the tadpole knows exactly what to fix, rather than
+	// re-triaging from the thread root (which may be a planning doc or unrelated).
+	buttonMessageText := cb.Message.Text
+
 	go func() {
 		userName := c.ResolveUserName(userID)
 		finalBlocks := SpawnedByBlocks(cb.Message.Blocks, userName)
@@ -62,6 +67,7 @@ func handleInteractive(ctx context.Context, c *Client, evt socketmode.Event) {
 			slog.Error("failed to fetch thread message for fix button", "error", err)
 			return
 		}
+		msg.Text = buttonMessageText
 		msg.IsTriggered = true
 		msg.IsTadpoleRequest = true
 
