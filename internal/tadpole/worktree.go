@@ -70,7 +70,15 @@ func CreateWorktree(ctx context.Context, repoPath, slug, defaultBranch string) (
 		}
 	}
 
-	return &WorktreeResult{Path: wtPath, Branch: branch, StaleBase: staleBase}, nil
+	// Capture HEAD as the immutable baseline for all diff comparisons.
+	// Using a fixed commit hash avoids races where a concurrent fetch
+	// moves origin/<defaultBranch> between validation and pre-flight checks.
+	baseCommit, err := gitOutput(ctx, wtPath, "rev-parse", "HEAD")
+	if err != nil {
+		slog.Warn("failed to capture base commit", "error", err)
+	}
+
+	return &WorktreeResult{Path: wtPath, Branch: branch, StaleBase: staleBase, BaseCommit: baseCommit}, nil
 }
 
 // CheckoutWorktree creates a worktree from an existing remote branch (for review fixes).

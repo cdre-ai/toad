@@ -306,9 +306,14 @@ func (r *Runner) Execute(ctx context.Context, task Task) error {
 	slog.Info("validation passed", "files_changed", valResult.FilesChanged)
 	r.setStatus(task, fmt.Sprintf("Tests passed — %d files changed", valResult.FilesChanged))
 
-	// Pre-flight: check for empty diff against default branch before shipping.
-	// Catches "no changes vs main" early, avoiding wasted push/PR API calls.
-	preDiffCmd := exec.CommandContext(ctx, "git", "diff", "--name-only", "origin/"+repo.DefaultBranch)
+	// Pre-flight: check for empty diff against the base commit before shipping.
+	// Uses the captured BaseCommit (immutable) instead of origin/<defaultBranch>
+	// (which can move if a concurrent fetch happens).
+	diffBase := "origin/" + repo.DefaultBranch
+	if wt.BaseCommit != "" {
+		diffBase = wt.BaseCommit
+	}
+	preDiffCmd := exec.CommandContext(ctx, "git", "diff", "--name-only", diffBase)
 	preDiffCmd.Dir = wt.Path
 	if preDiffOut, preDiffErr := preDiffCmd.Output(); preDiffErr == nil && strings.TrimSpace(string(preDiffOut)) == "" {
 		return fail("no changes vs main — the issue may already be fixed on the target branch")
