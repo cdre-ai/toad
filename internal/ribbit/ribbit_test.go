@@ -305,6 +305,8 @@ func TestStalenessNote_UpToDate(t *testing.T) {
 		}
 	}
 	run("git", "init", "-b", "main")
+	run("git", "config", "user.email", "test@test.com")
+	run("git", "config", "user.name", "Test")
 	run("git", "commit", "--allow-empty", "-m", "init")
 	// Create a bare clone to act as origin, then add it as a remote.
 	bare := t.TempDir()
@@ -338,6 +340,8 @@ func TestStalenessNote_Stale(t *testing.T) {
 		}
 	}
 	run("git", "init", "-b", "main")
+	run("git", "config", "user.email", "test@test.com")
+	run("git", "config", "user.name", "Test")
 	run("git", "commit", "--allow-empty", "-m", "init")
 	// Create a bare clone as origin.
 	bare := t.TempDir()
@@ -354,6 +358,8 @@ func TestStalenessNote_Stale(t *testing.T) {
 	// Push a new commit to origin so it's ahead.
 	cloneDir := t.TempDir()
 	run2(cloneDir, "git", "clone", bare+"/repo.git", cloneDir+"/work")
+	run2(cloneDir+"/work", "git", "config", "user.email", "test@test.com")
+	run2(cloneDir+"/work", "git", "config", "user.name", "Test")
 	run2(cloneDir+"/work", "git", "commit", "--allow-empty", "-m", "ahead")
 	run2(cloneDir+"/work", "git", "push", "origin", "main")
 	// Fetch in the original repo so origin/main is updated but HEAD stays behind.
