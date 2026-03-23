@@ -81,6 +81,9 @@ func (r *Runner) Execute(ctx context.Context, task Task) error {
 	}
 	runID := fmt.Sprintf("tadpole-%d-%s", start.UnixMilli(), hex)
 
+	// Immediately take over the status indicator from the caller
+	r.setStatus(task, "Setting up worktree...")
+
 	repo := task.repoConfig(r.cfg)
 	vcsProvider := r.vcs(repo.Path)
 
@@ -122,7 +125,6 @@ func (r *Runner) Execute(ctx context.Context, task Task) error {
 	}
 
 	// 1. Create worktree (or checkout existing branch for review fixes)
-	r.setStatus(task, "Setting up worktree...")
 	r.stateManager.Update(runID, "starting")
 
 	var wt *WorktreeResult

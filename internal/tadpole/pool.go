@@ -24,14 +24,25 @@ func NewPool(sem chan struct{}, runner *Runner) *Pool {
 }
 
 // Spawn acquires a semaphore slot and launches a tadpole in a goroutine.
-// Blocks if all slots are in use.
+// Blocks if all slots are in use; refreshes the Slack status indicator
+// every 90s while waiting so it doesn't auto-clear after 2 minutes.
 func (p *Pool) Spawn(ctx context.Context, task Task) error {
 	// Acquire semaphore (blocks if full)
-	select {
-	case p.sem <- struct{}{}:
-	case <-ctx.Done():
-		return ctx.Err()
+	ticker := time.NewTicker(90 * time.Second)
+	defer ticker.Stop()
+	for {
+		select {
+		case p.sem <- struct{}{}:
+			goto acquired
+		case <-ticker.C:
+			if p.runner.slack != nil && task.SlackChannel != "" && task.SlackThreadTS != "" {
+				p.runner.slack.SetStatus(task.SlackChannel, task.SlackThreadTS, "Waiting for available slot...")
+			}
+		case <-ctx.Done():
+			return ctx.Err()
+		}
 	}
+acquired:
 
 	// Detach from the parent context so running tadpoles aren't killed
 	// when the signal context cancels (shutdown/restart). Each tadpole
