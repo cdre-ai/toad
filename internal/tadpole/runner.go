@@ -372,7 +372,7 @@ func (r *Runner) Execute(ctx context.Context, task Task) error {
 			}
 		}
 
-		prURL, err = r.ship(ctx, vcsProvider, wt.Path, wt.Branch, task, repo.AutoMerge, repo.PRLabels, slackLink, task.RepoPaths, repo.DefaultBranch)
+		prURL, err = r.ship(ctx, vcsProvider, wt.Path, wt.Branch, task, repo.AutoMerge, repo.PRLabels, slackLink, task.RepoPaths, repo.DefaultBranch, wt.BaseCommit)
 		if err != nil {
 			return fail(fmt.Sprintf("shipping: %s", err))
 		}
@@ -448,7 +448,7 @@ func (r *Runner) clearStatus(task Task) {
 	r.slack.ClearStatus(task.SlackChannel, task.SlackThreadTS)
 }
 
-func (r *Runner) ship(ctx context.Context, vcsProvider vcs.Provider, worktreePath, branch string, task Task, autoMerge bool, prLabels []string, slackLink string, repoPaths map[string]string, defaultBranch string) (string, error) {
+func (r *Runner) ship(ctx context.Context, vcsProvider vcs.Provider, worktreePath, branch string, task Task, autoMerge bool, prLabels []string, slackLink string, repoPaths map[string]string, defaultBranch string, baseCommit string) (string, error) {
 	// Push branch to origin
 	slog.Info("pushing branch", "branch", branch)
 	pushCmd := exec.CommandContext(ctx, "git", "push", "-u", "origin", branch)
@@ -461,7 +461,13 @@ func (r *Runner) ship(ctx context.Context, vcsProvider vcs.Provider, worktreePat
 
 	// Verify we have commits ahead of the default branch — catches cases where
 	// Agent's changes are identical to what's already on main after push.
-	diffCmd := exec.CommandContext(ctx, "git", "log", "origin/"+defaultBranch+"..HEAD", "--oneline")
+	// Use the immutable baseCommit when available to avoid false positives from
+	// the agent fetching origin during its run (which moves origin/defaultBranch).
+	logBase := "origin/" + defaultBranch
+	if baseCommit != "" {
+		logBase = baseCommit
+	}
+	diffCmd := exec.CommandContext(ctx, "git", "log", logBase+"..HEAD", "--oneline")
 	diffCmd.Dir = worktreePath
 	diffOut, err := diffCmd.Output()
 	if err == nil && strings.TrimSpace(string(diffOut)) == "" {
